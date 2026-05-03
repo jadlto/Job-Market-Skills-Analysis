@@ -1,8 +1,10 @@
+import sys  # ✅ FIX: needed for sys.executable
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 from pathlib import Path
 import subprocess
+from api_connector import fetch_market_data  # ✅ FIX: moved import to top level
 
 # --- PATHS ---
 CURRENT_DIR = Path(__file__).parent.resolve()
@@ -28,7 +30,6 @@ df = load_processed_data()
 
 # --- DYNAMIC DROPDOWN FROM CLASSIFIED DATA ---
 if not df.empty:
-    # Only show categories that aren't "Other"
     categories = sorted(df[df['clean_category'] != 'Other']['clean_category'].unique())
     selected_role = st.selectbox("Select Classified Role:", options=categories)
 else:
@@ -37,20 +38,18 @@ else:
 
 if st.button("🚀 Refresh Pipeline"):
     with st.status("Running Transformation Pipeline...") as status:
-        # 1. Fetch raw (unchanged)
-        from api_connector import fetch_market_data
         fetch_market_data()
-        # 2. Transform (Skill Analyzer)
-        subprocess.run(["python3", str(CURRENT_DIR / "skill_analyzer.py")])
+        # ✅ FIX: use sys.executable so the venv Python is used, not system python3
+        subprocess.run([sys.executable, str(CURRENT_DIR / "skill_analyzer.py")])
         st.cache_data.clear()
         st.session_state.has_run = True
+        status.update(label="✅ Pipeline complete!", state="complete")  # ✅ FIX: mark status as done
     st.rerun()
 
 st.divider()
 
 # --- VISUALIZATION OF TRANSFORMED DATA ---
 if selected_role and not df.empty:
-    # Filter data by the classified category
     role_df = df[df['clean_category'] == selected_role]
     
     st.subheader(f"Market Insights: {selected_role}")
@@ -58,7 +57,6 @@ if selected_role and not df.empty:
     col_chart, col_stats = st.columns([1.3, 0.7])
     
     with col_chart:
-        # Explode the skills list to count them
         all_skills = [skill for sublist in role_df['found_skills'] for skill in sublist]
         skill_counts = pd.Series(all_skills).value_counts().reset_index()
         skill_counts.columns = ['Skill', 'Count']

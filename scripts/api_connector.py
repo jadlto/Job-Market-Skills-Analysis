@@ -6,14 +6,10 @@ import duckdb
 from pathlib import Path
 
 # 1. SETUP PATHS
-# Resolves the absolute path to ensure the script works regardless of where it's called from
 CURRENT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = CURRENT_DIR.parent
 DB_FILE = PROJECT_ROOT / "data" / "market_data.duckdb"
 CONFIG_FILE = PROJECT_ROOT / "config" / "config.yaml"
-
-# Targeted path based on your directory structure (image_ed5163.png)
-# This points into the .venv folder to grab the specific text file
 KEYS_FILE = PROJECT_ROOT / ".venv" / "api_keys.txt"
 
 def fetch_market_data():
@@ -38,7 +34,6 @@ def fetch_market_data():
             clean_line = line.strip()
             if '=' in clean_line:
                 key, val = clean_line.split('=', 1)
-                # Clean up whitespace and quotes
                 val = val.strip().strip('"').strip("'")
                 if 'ADZUNA_APP_ID' in key.upper():
                     app_id = val
@@ -74,7 +69,7 @@ def fetch_market_data():
         except Exception as e:
             print(f"❌ Connection Error: {e}")
             
-        time.sleep(0.5) # Polite rate limiting
+        time.sleep(0.5)
 
     if not all_jobs:
         print("Empty results. Check your API keys or search term in config.yaml.")
@@ -83,20 +78,18 @@ def fetch_market_data():
     # 5. DATA PROCESSING
     df = pd.DataFrame(all_jobs)
     
-    # Flatten nested dictionaries for DuckDB compatibility
     df['company'] = df['company'].apply(lambda x: x.get('display_name') if isinstance(x, dict) else str(x))
     df['location'] = df['location'].apply(lambda x: x.get('display_name') if isinstance(x, dict) else str(x))
     
-    # Keep essential columns to keep the database clean
+    # ✅ FIX: Guard against missing columns from API response
     cols = ['id', 'title', 'company', 'location', 'description', 'created']
+    cols = [c for c in cols if c in df.columns]
     df = df[cols]
 
     # 6. DATABASE WRITE
-    # Ensure data directory exists
     DB_FILE.parent.mkdir(parents=True, exist_ok=True)
     
     with duckdb.connect(str(DB_FILE)) as con:
-        # Atomic replacement of the jobs table
         con.execute("CREATE OR REPLACE TABLE jobs AS SELECT * FROM df")
     
     print(f"✅ Success! Ingested {len(df)} jobs into {DB_FILE.name}")

@@ -10,20 +10,23 @@ PROJECT_ROOT = CURRENT_DIR.parent
 DB_FILE = PROJECT_ROOT / "data" / "market_data.duckdb"
 OUTPUT_FILE = PROJECT_ROOT / "data" / "processed_market_data.parquet"
 
-# --- CLASSIFICATION RULES ---
-# This maps messy titles to clean categories
+# --- SMART CLASSIFICATION RULES ---
 CATEGORY_MAP = {
     "Accountant": ["ACCOUNTANT", "BOOKKEEPER", "TAX", "AUDIT", "CONTROLLER", "TREASURY"],
-    "Data Analyst": ["DATA ANALYST", "ANALYTICS", "INSIGHTS", "BI ANALYST"],
-    "Financial Analyst": ["FINANCIAL ANALYST", "FINANCE ANALYST", "FP&A", "COST ANALYST"],
-    "Data Engineer": ["DATA ENGINEER", "ETL", "DATA ARCHITECT"],
-    "Software Engineer": ["SOFTWARE ENGINEER", "DEVELOPER", "FULLSTACK", "BACKEND", "FRONTEND"]
+    "Financial Analyst": ["FINANCIAL ANALYST", "FINANCE ANALYST", "FP&A", "COST ANALYST", "INVESTMENT"],
+    "Data Analyst": ["DATA ANALYST", "ANALYTICS", "INSIGHTS", "BI ANALYST", "REPORTING ANALYST"],
+    "Data Engineer": ["DATA ENGINEER", "ETL", "DATA ARCHITECT", "PIPELINE"],
+    # ✅ FIX: Added "FULL STACK" and "FULL-STACK" — "FULLSTACK" never matches real job titles
+    "Software Engineer": ["SOFTWARE ENGINEER", "DEVELOPER", "FULL STACK", "FULL-STACK", "BACKEND", "FRONTEND", "PYTHON DEVELOPER"],
+    "Project Manager": ["PROJECT MANAGER", "PMP", "PROGRAM MANAGER"],
+    "Business Analyst": ["BUSINESS ANALYST", "SYSTEMS ANALYST", "OPERATIONS ANALYST"]
 }
 
 # --- SKILL KEYWORDS ---
 CORE_SKILLS = [
     "PYTHON", "SQL", "EXCEL", "CPA", "GAAP", "TAX", "AUDIT", "SAP", "ORACLE", 
-    "TABLEAU", "POWER BI", "AWS", "AZURE", "SNOWFLAKE", "BUDGETING", "FORECASTING"
+    "TABLEAU", "POWER BI", "AWS", "AZURE", "SNOWFLAKE", "BUDGETING", "FORECASTING",
+    "RECONCILIATION", "FINANCIAL REPORTING", "QUICKBOOKS", "VLOOKUP"
 ]
 
 def classify_role(title):
@@ -35,28 +38,26 @@ def classify_role(title):
 
 def analyze():
     if not DB_FILE.exists():
+        print("❌ Database not found.")
         return
 
     con = duckdb.connect(str(DB_FILE))
-    # Grab all raw data
     df = con.execute("SELECT title, description, company FROM jobs").df()
     con.close()
 
-    # 1. CLASSIFICATION TRANSFORMATION
+    # 1. Apply Classification
     df['clean_category'] = df['title'].apply(classify_role)
 
-    # 2. SKILL EXTRACTION TRANSFORMATION
-    # We'll create a list of skills for every job row
+    # 2. Extract Skills
     def extract_skills(desc):
         desc = str(desc).upper()
         return [skill for skill in CORE_SKILLS if re.search(rf'\b{re.escape(skill)}\b', desc)]
 
     df['found_skills'] = df['description'].apply(extract_skills)
 
-    # 3. SAVE THE FULL TRANSFORMED DATA
-    # This now contains the original data PLUS our new classification columns
+    # 3. Save Transformed Data
     df.to_parquet(OUTPUT_FILE, index=False)
-    print(f"✅ Transformation complete. Saved to {OUTPUT_FILE}")
+    print(f"✅ Transformation complete. Processed {len(df)} jobs. Saved to {OUTPUT_FILE}")
 
 if __name__ == "__main__":
     analyze()

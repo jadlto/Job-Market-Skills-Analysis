@@ -1,31 +1,22 @@
 import subprocess
-import yaml
-import os
+import sys  # ✅ FIX: needed for sys.executable
+from pathlib import Path
 
 def run_step(script_name):
     print(f"--- Running {script_name} ---")
-    result = subprocess.run(["python3", f"scripts/{script_name}"], capture_output=True, text=True)
-    print(result.stdout)
+    # ✅ FIX: anchor path to this file's directory, not the working directory
+    script_path = Path(__file__).parent / script_name
+    result = subprocess.run([sys.executable, str(script_path)], capture_output=True, text=True)
+    
+    if result.stdout:
+        print(result.stdout)
     if result.stderr:
         print(f"Error in {script_name}: {result.stderr}")
 
 def main():
-    # 1. Ask user for input (updates config.yaml temporarily)
-    new_title = input("What job title should we analyze? (e.g., Data Engineer): ")
-    
-    # Update config.yaml
-    with open("config/config.yaml", 'r') as f:
-        config = yaml.safe_load(f)
-    config['search']['job_title'] = new_title
-    with open("config/config.yaml", 'w') as f:
-        yaml.dump(config, f)
-
-    # 2. Execute Pipeline
     run_step("api_connector.py")
     run_step("skill_analyzer.py")
-    
-    print("\n✅ Pipeline Finished! To view results, run:")
-    print("streamlit run scripts/dashboard.py")
+    print("\n✅ Pipeline Finished! Raw data ingested and transformation applied.")
 
 if __name__ == "__main__":
     main()
