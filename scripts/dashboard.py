@@ -4,6 +4,7 @@ import pandas as pd
 import plotly.express as px
 from pathlib import Path
 import subprocess
+import yaml
 from api_connector import fetch_market_data
 
 # --- PATHS ---
@@ -23,8 +24,7 @@ if st.button("🚀 Fetch & Analyze"):
     if not job_title.strip():
         st.warning("Please enter a job title first.")
     else:
-        # Write the job title to config.yaml before running pipeline
-        import yaml
+        # Write job title to config
         with open(CONFIG_FILE, 'r') as f:
             config = yaml.safe_load(f)
         config['search']['job_title'] = job_title.strip()
@@ -32,8 +32,19 @@ if st.button("🚀 Fetch & Analyze"):
             yaml.dump(config, f)
 
         with st.status(f"Running pipeline for '{job_title}'...") as status:
-            subprocess.run([sys.executable, str(CURRENT_DIR / "run_pipeline.py")], capture_output=False)
-            status.update(label="✅ Done!", state="complete")
+            # ✅ FIX: block until pipeline fully completes before rerunning
+            result = subprocess.run(
+                [sys.executable, str(CURRENT_DIR / "run_pipeline.py")],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode != 0:
+                status.update(label="❌ Pipeline failed!", state="error")
+                st.code(result.stderr)
+                st.stop()
+            else:
+                status.update(label="✅ Done!", state="complete")
+
         st.rerun()
 
 st.divider()
@@ -73,10 +84,15 @@ if selected_role and not df.empty:
         skill_counts = pd.Series(all_skills).value_counts().reset_index()
         skill_counts.columns = ['Skill', 'Count']
 
-        fig = px.bar(skill_counts.head(15).sort_values('Count'),
-                     x='Count', y='Skill', orientation='h',
-                     template="plotly_dark", color='Count')
-        st.plotly_chart(fig, use_container_width=True)
+        if skill_counts.empty:
+            st.info("No skills found for this category.")
+        else:
+            fig = px.bar(
+                skill_counts.head(15).sort_values('Count'),
+                x='Count', y='Skill', orientation='h',
+                template="plotly_dark", color='Count'
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
     with col_stats:
         st.metric("Total Listings in Category", len(role_df))
