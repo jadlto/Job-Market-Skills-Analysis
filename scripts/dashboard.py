@@ -1,10 +1,10 @@
-import sys  # ✅ FIX: needed for sys.executable
+import sys
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 from pathlib import Path
 import subprocess
-from api_connector import fetch_market_data  # ✅ FIX: moved import to top level
+from api_connector import fetch_market_data
 
 # --- PATHS ---
 CURRENT_DIR = Path(__file__).parent.resolve()
@@ -13,24 +13,26 @@ PROCESSED_FILE = PROJECT_ROOT / "data" / "processed_market_data.parquet"
 
 st.set_page_config(page_title="Market Skill Discovery", layout="wide")
 
-# Initialize state
 if "has_run" not in st.session_state:
     st.session_state.has_run = False
 
 st.title("🎯 Targeted Market Skill Discovery")
 
 # --- LOAD TRANSFORMED DATA ---
+# ✅ FIX: cache key tied to file modification time — auto-busts when pipeline writes new data
 @st.cache_data
-def load_processed_data():
+def load_processed_data(last_modified: float):
     if not PROCESSED_FILE.exists():
         return pd.DataFrame()
     return pd.read_parquet(PROCESSED_FILE)
 
-df = load_processed_data()
+# Pass mtime as the cache key so stale data is never shown
+mtime = PROCESSED_FILE.stat().st_mtime if PROCESSED_FILE.exists() else 0
+df = load_processed_data(mtime)
 
-# --- DYNAMIC DROPDOWN FROM CLASSIFIED DATA ---
+# --- DYNAMIC DROPDOWN ---
 if not df.empty:
-    categories = sorted(df[df['clean_category'] != 'Other']['clean_category'].unique())
+    categories = sorted(df['clean_category'].unique())
     selected_role = st.selectbox("Select Classified Role:", options=categories)
 else:
     st.warning("No processed data found. Please run a fetch/analyze cycle.")
@@ -39,30 +41,28 @@ else:
 if st.button("🚀 Refresh Pipeline"):
     with st.status("Running Transformation Pipeline...") as status:
         fetch_market_data()
-        # ✅ FIX: use sys.executable so the venv Python is used, not system python3
         subprocess.run([sys.executable, str(CURRENT_DIR / "skill_analyzer.py")])
-        st.cache_data.clear()
         st.session_state.has_run = True
-        status.update(label="✅ Pipeline complete!", state="complete")  # ✅ FIX: mark status as done
+        status.update(label="✅ Pipeline complete!", state="complete")
     st.rerun()
 
 st.divider()
 
-# --- VISUALIZATION OF TRANSFORMED DATA ---
+# --- VISUALIZATION ---
 if selected_role and not df.empty:
     role_df = df[df['clean_category'] == selected_role]
-    
+
     st.subheader(f"Market Insights: {selected_role}")
-    
+
     col_chart, col_stats = st.columns([1.3, 0.7])
-    
+
     with col_chart:
         all_skills = [skill for sublist in role_df['found_skills'] for skill in sublist]
         skill_counts = pd.Series(all_skills).value_counts().reset_index()
         skill_counts.columns = ['Skill', 'Count']
-        
-        fig = px.bar(skill_counts.head(15).sort_values('Count'), 
-                     x='Count', y='Skill', orientation='h', 
+
+        fig = px.bar(skill_counts.head(15).sort_values('Count'),
+                     x='Count', y='Skill', orientation='h',
                      template="plotly_dark", color='Count')
         st.plotly_chart(fig, use_container_width=True)
 
