@@ -1,15 +1,20 @@
-# Virtual Environment
+# Virtual environment
 .venv/
-venv/
-ENV/
+
+# Data files
+data/
+*.duckdb
+*.parquet
+
+# Secrets
+api_keys.txt
+
+# Config (has personal search terms)
+config/config.yaml
 
 # Python cache
 __pycache__/
-*.py[cod]
+*.pyc
 
-# Secret files (if you use them later)
-.env
-
-# Linux/System clutter
+# OS
 .DS_Store
-*.log
