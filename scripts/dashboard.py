@@ -4,7 +4,8 @@ import duckdb
 import plotly.express as px
 from pathlib import Path
 import yaml
-from api_connector import fetch_market_data
+import os
+import subprocess # Needed to trigger the analyzer
 
 # --- PATHS ---
 CURRENT_DIR = Path(__file__).parent.resolve()
@@ -13,8 +14,10 @@ DB_FILE = PROJECT_ROOT / "data" / "market_data.duckdb"
 SKILL_FILE = PROJECT_ROOT / "data" / "skill_analysis.parquet"
 CONFIG_FILE = PROJECT_ROOT / "config" / "config.yaml"
 
-# --- 1. MASTER LIST (One source for everything) ---
+# --- 1. EXPANDED MASTER LIST ---
 JOB_MAP = {
+    "Financial Analyst": "Finance",
+    "Investment Banker": "Finance",
     "Data Analyst": "IT & Data",
     "Data Engineer": "IT & Data",
     "Data Scientist": "IT & Data",
@@ -23,30 +26,26 @@ JOB_MAP = {
     "DevOps Engineer": "Engineering",
     "Cybersecurity Analyst": "Security",
     "Marketing Analyst": "Marketing",
-    "Product Manager": "Product",
     "Business Analyst": "Product",
-    "Financial Analyst": "Finance"
+    "Sales Operations": "Sales"
 }
 
 st.set_page_config(page_title="Market Skill Discovery", layout="wide")
 
-# Handle the "Blank Start" logic
 if "has_run" not in st.session_state:
     st.session_state.has_run = False
 
 st.title("🎯 Targeted Market Skill Discovery")
 
-# --- 2. THE ONLY DROPDOWN ---
-# This replaces the two-dropdown system entirely.
+# --- 2. THE SINGLE DROPDOWN ---
 selected_title = st.selectbox(
     "Select Job Title:", 
-    options=sorted(list(JOB_MAP.keys())),
-    help="Choose a title to fetch live market data."
+    options=sorted(list(JOB_MAP.keys()))
 )
 
 if st.button("🚀 Refresh Market Data"):
-    with st.status(f"Fetching {selected_title} jobs...") as status:
-        # Update config.yaml
+    with st.status(f"Processing {selected_title}...") as status:
+        # 1. Update config.yaml
         with open(CONFIG_FILE, 'r') as f:
             conf = yaml.safe_load(f)
         conf['search']['job_title'] = selected_title
@@ -54,39 +53,55 @@ if st.button("🚀 Refresh Market Data"):
             yaml.dump(conf, f)
 
         try:
+            # 2. Run API Connector (Imported function)
+            from api_connector import fetch_market_data
+            status.update(label="📡 Fetching live postings...")
             fetch_market_data()
-            # run_skill_analysis() # Call your analyzer here
+            
+            # 3. Run Skill Analyzer (Via Subprocess to ensure fresh state)
+            status.update(label="🧠 Analyzing skills...")
+            # This is the "secret sauce" - it runs your second script automatically
+            subprocess.run(["python3", str(CURRENT_DIR / "skill_analyzer.py")], capture_output=True)
+            
             st.session_state.has_run = True
-            status.update(label="Sync Complete!", state="complete")
+            status.update(label="✅ Success! Dashboard updated.", state="complete")
         except Exception as e:
-            st.error(f"Sync failed: {e}")
+            st.error(f"Pipeline failed: {e}")
+            
     st.rerun()
 
 st.divider()
 
-# --- 3. BLANK STATE LOGIC ---
+# --- 3. BLANK STATE ---
 if not st.session_state.has_run:
-    st.info("👋 Select a title and hit 'Refresh' to see the analysis.")
+    st.info("👋 Select a title and hit 'Refresh' to begin.")
     st.stop()
 
-# --- 4. DATA VISUALIZATION ---
+# --- 4. VISUALIZATION ---
 if DB_FILE.exists():
     with duckdb.connect(str(DB_FILE), read_only=True) as con:
         row_count = con.execute("SELECT count(*) FROM jobs").fetchone()[0]
         
         if row_count > 0:
-            current_group = JOB_MAP[selected_title]
-            st.subheader(f"Results for {selected_title} in {current_group}")
+            st.subheader(f"Analysis for {selected_title}")
             
             c1, c2 = st.columns([1.3, 0.7])
             with c1:
                 if SKILL_FILE.exists():
+                    # We read the file freshly here
                     df_skills = pd.read_parquet(SKILL_FILE)
-                    fig = px.bar(df_skills.sort_values('Count'), x='Count', y='Skill', 
-                                orientation='h', template="plotly_dark", color='Count')
+                    fig = px.bar(
+                        df_skills.sort_values('Count'), 
+                        x='Count', y='Skill', 
+                        orientation='h', 
+                        template="plotly_dark", 
+                        color='Count',
+                        color_continuous_scale='Viridis'
+                    )
                     st.plotly_chart(fig, use_container_width=True)
+            
             with c2:
-                st.metric("Total Jobs Found", row_count)
+                st.metric("Jobs Found", row_count)
                 st.write("**Top Companies**")
                 top_df = con.execute("SELECT company, count(*) as Postings FROM jobs GROUP BY company ORDER BY Postings DESC LIMIT 10").df()
                 st.dataframe(top_df, use_container_width=True, hide_index=True)
