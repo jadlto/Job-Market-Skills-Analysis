@@ -1,0 +1,15 @@
+# Virtual Environment
+.venv/
+venv/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Secret files (if you use them later)
+.env
+
+# Linux/System clutter
+.DS_Store
+*.log
