@@ -10,41 +10,53 @@ from api_connector import fetch_market_data
 CURRENT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = CURRENT_DIR.parent
 PROCESSED_FILE = PROJECT_ROOT / "data" / "processed_market_data.parquet"
+CONFIG_FILE = PROJECT_ROOT / "config" / "config.yaml"
 
 st.set_page_config(page_title="Market Skill Discovery", layout="wide")
 
-if "has_run" not in st.session_state:
-    st.session_state.has_run = False
-
 st.title("🎯 Targeted Market Skill Discovery")
 
+# --- JOB TITLE INPUT ---
+job_title = st.text_input("Enter a job title to analyze:", placeholder="e.g. Data Analyst, Software Engineer")
+
+if st.button("🚀 Fetch & Analyze"):
+    if not job_title.strip():
+        st.warning("Please enter a job title first.")
+    else:
+        # Write the job title to config.yaml before running pipeline
+        import yaml
+        with open(CONFIG_FILE, 'r') as f:
+            config = yaml.safe_load(f)
+        config['search']['job_title'] = job_title.strip()
+        with open(CONFIG_FILE, 'w') as f:
+            yaml.dump(config, f)
+
+        with st.status(f"Running pipeline for '{job_title}'...") as status:
+            subprocess.run([sys.executable, str(CURRENT_DIR / "run_pipeline.py")], capture_output=False)
+            status.update(label="✅ Done!", state="complete")
+        st.rerun()
+
+st.divider()
+
 # --- LOAD TRANSFORMED DATA ---
-# ✅ FIX: cache key tied to file modification time — auto-busts when pipeline writes new data
 @st.cache_data
 def load_processed_data(last_modified: float):
     if not PROCESSED_FILE.exists():
         return pd.DataFrame()
     return pd.read_parquet(PROCESSED_FILE)
 
-# Pass mtime as the cache key so stale data is never shown
 mtime = PROCESSED_FILE.stat().st_mtime if PROCESSED_FILE.exists() else 0
 df = load_processed_data(mtime)
 
 # --- DYNAMIC DROPDOWN ---
 if not df.empty:
-    categories = sorted(df['clean_category'].unique())
+    categories = ["-- Select a Role --"] + sorted(df['clean_category'].unique())
     selected_role = st.selectbox("Select Classified Role:", options=categories)
+    if selected_role == "-- Select a Role --":
+        selected_role = None
 else:
-    st.warning("No processed data found. Please run a fetch/analyze cycle.")
+    st.info("Enter a job title above and click Fetch & Analyze to get started.")
     selected_role = None
-
-if st.button("🚀 Refresh Pipeline"):
-    with st.status("Running Transformation Pipeline...") as status:
-        fetch_market_data()
-        subprocess.run([sys.executable, str(CURRENT_DIR / "skill_analyzer.py")])
-        st.session_state.has_run = True
-        status.update(label="✅ Pipeline complete!", state="complete")
-    st.rerun()
 
 st.divider()
 
