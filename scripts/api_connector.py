@@ -5,64 +5,101 @@ import time
 import duckdb
 from pathlib import Path
 
-# Absolute Path Configuration
+# 1. SETUP PATHS
+# Resolves the absolute path to ensure the script works regardless of where it's called from
 CURRENT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = CURRENT_DIR.parent
 DB_FILE = PROJECT_ROOT / "data" / "market_data.duckdb"
 CONFIG_FILE = PROJECT_ROOT / "config" / "config.yaml"
+
+# Targeted path based on your directory structure (image_ed5163.png)
+# This points into the .venv folder to grab the specific text file
 KEYS_FILE = PROJECT_ROOT / ".venv" / "api_keys.txt"
 
-def fetch_to_duckdb():
-    # Load Config & Keys
+def fetch_market_data():
+    # 2. LOAD SEARCH CONFIGURATION
+    if not CONFIG_FILE.exists():
+        print(f"❌ ERROR: Config file missing at {CONFIG_FILE}")
+        return
+        
     with open(CONFIG_FILE, 'r') as f:
         config = yaml.safe_load(f)
     
-    keys = {}
+    # 3. EXTRACT KEYS FROM api_keys.txt
+    app_id, app_key = None, None
+    if not KEYS_FILE.exists():
+        print(f"❌ ERROR: Key file missing at {KEYS_FILE}")
+        print("Ensure 'api_keys.txt' is inside the '.venv' folder.")
+        return
+
+    print(f"🔑 Reading keys from {KEYS_FILE}...")
     with open(KEYS_FILE, 'r') as f:
         for line in f:
-            if '=' in line:
-                k, v = line.strip().split('=', 1)
-                keys[k.strip()] = v.strip()
+            clean_line = line.strip()
+            if '=' in clean_line:
+                key, val = clean_line.split('=', 1)
+                # Clean up whitespace and quotes
+                val = val.strip().strip('"').strip("'")
+                if 'ADZUNA_APP_ID' in key.upper():
+                    app_id = val
+                elif 'ADZUNA_APP_KEY' in key.upper():
+                    app_key = val
 
-    target = config['search']['job_title']
+    if not app_id or not app_key:
+        print(f"❌ ERROR: Could not find ADZUNA_APP_ID or ADZUNA_APP_KEY in {KEYS_FILE}")
+        return
+
+    target_job = config['search']['job_title']
     all_jobs = []
 
-    # API Request
-    for page in range(1, 4):
-        params = {
-            'app_id': keys.get('ADZUNA_APP_ID'),
-            'app_key': keys.get('ADZUNA_APP_KEY'),
-            'results_per_page': 50,
-            'what': target
-        }
-        r = requests.get(f"https://api.adzuna.com/v1/api/jobs/us/search/{page}", params=params)
-        if r.status_code == 200:
-            all_jobs.extend(r.json().get('results', []))
-            time.sleep(0.5)
+    print(f"📡 Fetching live market data for: {target_job}...")
 
-    if all_jobs:
-        raw_df = pd.DataFrame(all_jobs)
+    # 4. API REQUEST LOOP
+    for page in range(1, 4):
+        api_url = f"https://api.adzuna.com/v1/api/jobs/us/search/{page}"
+        params = {
+            'app_id': app_id,
+            'app_key': app_key,
+            'results_per_page': 50,
+            'what': target_job,
+        }
         
-        # Connect to DuckDB (creates file if not exists)
-        con = duckdb.connect(str(DB_FILE))
-        
-        # 1. HARD RESET: Overwrite the table with raw data
-        con.execute("CREATE OR REPLACE TABLE raw_jobs AS SELECT * FROM raw_df")
-        
-        # 2. DATA CLEANING: Extract company name from JSON-like strings
-        # This fixes the issue seen in image_edbeba.png
-        con.execute("""
-            CREATE OR REPLACE TABLE jobs AS 
-            SELECT 
-                title,
-                description,
-                CAST(company->>'$.display_name' AS VARCHAR) as company,
-                CAST(location->>'$.display_name' AS VARCHAR) as location
-            FROM raw_jobs
-        """)
-        
-        print(f"Successfully refreshed DuckDB with {len(all_jobs)} jobs for {target}")
-        con.close()
+        try:
+            r = requests.get(api_url, params=params)
+            if r.status_code == 200:
+                data = r.json()
+                all_jobs.extend(data.get('results', []))
+            else:
+                print(f"⚠️ API Error {r.status_code}: {r.text}")
+        except Exception as e:
+            print(f"❌ Connection Error: {e}")
+            
+        time.sleep(0.5) # Polite rate limiting
+
+    if not all_jobs:
+        print("Empty results. Check your API keys or search term in config.yaml.")
+        return
+
+    # 5. DATA PROCESSING
+    df = pd.DataFrame(all_jobs)
+    
+    # Flatten nested dictionaries for DuckDB compatibility
+    df['company'] = df['company'].apply(lambda x: x.get('display_name') if isinstance(x, dict) else str(x))
+    df['location'] = df['location'].apply(lambda x: x.get('display_name') if isinstance(x, dict) else str(x))
+    
+    # Keep essential columns to keep the database clean
+    cols = ['id', 'title', 'company', 'location', 'description', 'created']
+    df = df[cols]
+
+    # 6. DATABASE WRITE
+    # Ensure data directory exists
+    DB_FILE.parent.mkdir(parents=True, exist_ok=True)
+    
+    with duckdb.connect(str(DB_FILE)) as con:
+        # Atomic replacement of the jobs table
+        con.execute("CREATE OR REPLACE TABLE jobs AS SELECT * FROM df")
+    
+    print(f"✅ Success! Ingested {len(df)} jobs into {DB_FILE.name}")
 
 if __name__ == "__main__":
-    fetch_to_duckdb()
+    fetch_market_data()

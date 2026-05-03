@@ -1,47 +1,68 @@
+import requests
+import pandas as pd
+import yaml
+import time
+import duckdb
 import os
-import sys
+from pathlib import Path
 
-# LEVEL 1: IMMEDIATE FEEDBACK
-print("--- SCRIPT START ---")
+CURRENT_DIR = Path(__file__).parent.resolve()
+PROJECT_ROOT = CURRENT_DIR.parent
+DB_FILE = PROJECT_ROOT / "data" / "market_data.duckdb"
+CONFIG_FILE = PROJECT_ROOT / "config" / "config.yaml"
 
-try:
-    import pandas as pd
-    import yaml
-    import spacy
-    print("--- LIBRARIES LOADED ---")
-except ImportError as e:
-    print(f"--- IMPORT ERROR: {e} ---")
-    sys.exit()
-
-# LEVEL 2: PATH CHECKING
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
-CONFIG_FILE = os.path.join(PROJECT_ROOT, "config", "config.yaml")
-INPUT_FILE = os.path.join(PROJECT_ROOT, "data", "jobs_raw.csv")
-
-print(f"Looking for config at: {CONFIG_FILE}")
-print(f"Looking for data at: {INPUT_FILE}")
-
-def run_test():
-    print("--- ENTERING FUNCTION ---")
-    
-    if not os.path.exists(CONFIG_FILE):
-        print("FAIL: Config file missing!")
-        return
-    
+def fetch_market_data():
+    # 1. LOAD CONFIG
     with open(CONFIG_FILE, 'r') as f:
         config = yaml.safe_load(f)
-        print(f"SUCCESS: Loaded YAML. Skills: {config.get('target_skills')}")
+    
+    # 2. THE KEY LOOKUP (Explicitly check files)
+    # We'll check the .env or a text file since the shell variables are empty
+    app_id, app_key = None, None
+    
+    # Look for .env first
+    env_path = PROJECT_ROOT / ".env"
+    if env_path.exists():
+        with open(env_path, 'r') as f:
+            for line in f:
+                if 'ADZUNA_APP_ID' in line: app_id = line.split('=')[1].strip().strip('"')
+                if 'ADZUNA_APP_KEY' in line: app_key = line.split('=')[1].strip().strip('"')
 
-    if not os.path.exists(INPUT_FILE):
-        print("FAIL: CSV file missing!")
+    if not app_id or not app_key:
+        print(f"❌ CRITICAL: Keys not found at {env_path}")
         return
 
-    df = pd.read_csv(INPUT_FILE)
-    print(f"SUCCESS: Loaded CSV with {len(df)} rows.")
+    target_job = config['search']['job_title']
+    all_jobs = []
 
-# LEVEL 3: EXECUTION
+    # 3. API CALL
+    for page in range(1, 4):
+        params = {
+            'app_id': app_id,
+            'app_key': app_key,
+            'results_per_page': 50,
+            'what': target_job
+        }
+        r = requests.get(f"https://api.adzuna.com/v1/api/jobs/us/search/{page}", params=params)
+        
+        if r.status_code == 200:
+            all_jobs.extend(r.json().get('results', []))
+        else:
+            print(f"⚠️ API Rejected Request: {r.status_code} - {r.text}")
+        time.sleep(0.5)
+
+    if all_jobs:
+        df = pd.DataFrame(all_jobs)
+        # Flattening
+        df['company'] = df['company'].apply(lambda x: x.get('display_name') if isinstance(x, dict) else str(x))
+        df['location'] = df['location'].apply(lambda x: x.get('display_name') if isinstance(x, dict) else str(x))
+        
+        # 4. WRITE TO DUCKDB
+        with duckdb.connect(str(DB_FILE)) as con:
+            con.execute("CREATE OR REPLACE TABLE jobs AS SELECT * FROM df")
+        print(f"✅ Success: {len(all_jobs)} jobs added.")
+    else:
+        print("❌ No jobs found. Table was not updated.")
+
 if __name__ == "__main__":
-    print("--- MAIN BLOCK TRIGGERED ---")
-    run_test()
-    print("--- SCRIPT FINISHED ---")
+    fetch_market_data()
