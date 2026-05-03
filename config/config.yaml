@@ -1,24 +1,20 @@
 search:
-  job_title: Data Engineer
+  job_title: "Data Analyst"
+
 target_skills:
-- Python
-- SQL
-- Tableau
-- Power BI
-- Excel
-- R
-- SAS
-- AWS
-- Azure
-- GCP
-- Spark
-- Airflow
-- Snowflake
-- Looker
-- dbt
-- Docker
-- Kubernetes
-- Java
-- Scala
-- NoSQL
-- Hadoop
+  - Python
+  - SQL
+  - Tableau
+  - Power BI
+  - Excel
+  - Communication
+  - Project Management
+  - Leadership
+  - AWS
+  - Azure
+  - Snowflake
+  - R
+  - Statistics
+  - Customer Service
+  - Sales
+  - Marketing
