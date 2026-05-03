@@ -9,14 +9,22 @@ PROJECT_ROOT = CURRENT_DIR.parent
 DB_FILE = PROJECT_ROOT / "data" / "market_data.duckdb"
 OUTPUT_FILE = PROJECT_ROOT / "data" / "skill_analysis.parquet"
 
-CORE_TECH = ["Python", "SQL", "AWS", "Azure", "GCP", "Snowflake", "dbt", "Airflow", "Spark", "Tableau", "Power BI", "Excel", "R"]
+# EXPANDED KEYWORDS: Added Finance, Accounting, and Soft Skills
+CORE_TECH = [
+    # Data & Tech
+    "Python", "SQL", "AWS", "Azure", "Snowflake", "Excel", "Tableau", "Power BI", "R",
+    # Finance & Accounting
+    "CPA", "GAAP", "IFRS", "Tax", "Audit", "General Ledger", "Quickbooks", "SAP", "Oracle",
+    "Forecasting", "Budgeting", "Financial Reporting", "Reconciliation", "VLOOKUP", "Macros",
+    # Professional
+    "Project Management", "Agile", "Communication", "Leadership"
+]
 
 def analyze():
     if not DB_FILE.exists():
         return
 
     con = duckdb.connect(str(DB_FILE))
-    # Read from DuckDB table instead of Parquet
     df = con.execute("SELECT description FROM jobs").df()
     con.close()
 
@@ -26,6 +34,7 @@ def analyze():
     for desc in descriptions:
         clean_desc = desc.upper()
         for skill in CORE_TECH:
+            # Use regex to find whole words only (prevents "R" finding "manager")
             if re.search(rf'\b{re.escape(skill.upper())}\b', clean_desc):
                 found_skills.append(skill)
 
