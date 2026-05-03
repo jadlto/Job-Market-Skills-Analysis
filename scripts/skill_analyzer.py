@@ -5,9 +5,6 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import normalize
 import spacy
-from spacy.matcher import PhraseMatcher
-from skillNer.general_params import SKILL_DB
-from skillNer.skill_extractor_class import SkillExtractor
 
 # --- PATHS ---
 CURRENT_DIR = Path(__file__).parent.resolve()
@@ -15,10 +12,21 @@ PROJECT_ROOT = CURRENT_DIR.parent
 DB_FILE = PROJECT_ROOT / "data" / "market_data.duckdb"
 OUTPUT_FILE = PROJECT_ROOT / "data" / "processed_market_data.parquet"
 
-# --- LOAD MODELS ONCE ---
-print("⏳ Loading NLP models...")
+# --- LOAD MODEL ONCE ---
+print("⏳ Loading NLP model...")
 nlp = spacy.load("en_core_web_lg")
-skill_extractor = SkillExtractor(nlp, SKILL_DB, PhraseMatcher)
+
+# --- NOISE FILTER ---
+SKILL_STOPWORDS = {
+    "job description", "job", "description", "responsibilities", "requirements",
+    "qualifications", "experience", "education", "bachelor", "master", "degree",
+    "years", "ability", "knowledge", "understanding", "skills", "skill",
+    "work", "working", "team", "environment", "strong", "excellent",
+    "communication", "written", "verbal", "preferred", "required", "plus",
+    "opportunity", "position", "role", "candidate", "employer", "employee",
+    "salary", "benefits", "location", "remote", "hybrid", "onsite", "office",
+    "san", "authorization", "monday", "tuesday", "wednesday", "thursday", "friday"
+}
 
 
 def cluster_titles(titles: list[str]) -> dict[str, str]:
@@ -29,7 +37,6 @@ def cluster_titles(titles: list[str]) -> dict[str, str]:
     """
     unique_titles = list(set(titles))
 
-    # Vectorize titles
     vectorizer = TfidfVectorizer(ngram_range=(1, 2), stop_words="english")
     X = normalize(vectorizer.fit_transform(unique_titles))
 
@@ -40,7 +47,6 @@ def cluster_titles(titles: list[str]) -> dict[str, str]:
     km = KMeans(n_clusters=n_clusters, random_state=42, n_init="auto")
     km.fit(X)
 
-    # Name each cluster from its top TF-IDF terms
     terms = vectorizer.get_feature_names_out()
     cluster_names = {}
     for i, centroid in enumerate(km.cluster_centers_):
@@ -52,18 +58,22 @@ def cluster_titles(titles: list[str]) -> dict[str, str]:
 
 def extract_skills(desc: str) -> list[str]:
     """
-    Uses skillNer's built-in 6000+ skill database.
-    No manual skill list needed.
+    Extracts skills using spaCy NER.
+    Filters out generic job description noise.
     """
-    try:
-        annotations = skill_extractor.annotate(desc)
-        skills = [
-            s['doc_node_value']
-            for s in annotations['results']['full_matches'] + annotations['results']['ngram_scored']
-        ]
-        return list(set(skills))
-    except Exception:
-        return []
+    doc = nlp(str(desc))
+    skills = []
+    for ent in doc.ents:
+        if ent.label_ in ("ORG", "PRODUCT", "WORK_OF_ART", "GPE", "LAW"):
+            text = ent.text.strip()
+            # Filter noise, short tokens, pure numbers, and stopwords
+            if (
+                text.lower() not in SKILL_STOPWORDS
+                and len(text) > 2
+                and not text.isnumeric()
+            ):
+                skills.append(text)
+    return list(set(skills))
 
 
 def analyze():
@@ -71,7 +81,6 @@ def analyze():
         print("❌ Database not found. Run api_connector.py first.")
         return
 
-    # --- READ from DuckDB ---
     con = duckdb.connect(str(DB_FILE))
     df = con.execute("SELECT title, description, company FROM jobs").df()
     con.close()
