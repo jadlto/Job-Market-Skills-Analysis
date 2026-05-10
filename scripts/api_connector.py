@@ -5,7 +5,6 @@ import time
 import duckdb
 from pathlib import Path
 
-# 1. SETUP PATHS
 CURRENT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = CURRENT_DIR.parent
 DB_FILE = PROJECT_ROOT / "data" / "market_data.duckdb"
@@ -17,7 +16,7 @@ def _load_keys_from_file():
     app_id, app_key = None, None
     if not KEYS_FILE.exists():
         return app_id, app_key
-    print(f"🔑 Reading keys from {KEYS_FILE}...")
+    print(f"Reading keys from {KEYS_FILE}")
     with open(KEYS_FILE, "r") as f:
         for line in f:
             clean_line = line.strip()
@@ -40,36 +39,35 @@ def _load_keys_from_streamlit():
         return None, None
 
 
-def fetch_market_data() -> bool:
-    # 2. LOAD SEARCH CONFIGURATION
-    if not CONFIG_FILE.exists():
-        print(f"❌ ERROR: Config file missing at {CONFIG_FILE}")
+def fetch_market_data(job_title: str | None = None) -> bool:
+    """Fetch from Adzuna. Pass job_title from UI, or omit to use config (CLI)."""
+    target_job = (job_title or "").strip()
+    if not target_job:
+        if not CONFIG_FILE.exists():
+            print(f"ERROR: Config file missing at {CONFIG_FILE}")
+            return False
+        with open(CONFIG_FILE, "r") as f:
+            config = yaml.safe_load(f)
+        search = config.get("search") or {}
+        target_job = str(search.get("job_title", "")).strip()
+    if not target_job:
+        print("ERROR: No job title (argument or config.yaml search.job_title).")
         return False
 
-    with open(CONFIG_FILE, "r") as f:
-        config = yaml.safe_load(f)
-
-    # 3. API KEYS: file first, then Streamlit secrets (e.g. cloud deployment)
     app_id, app_key = _load_keys_from_file()
     if not app_id or not app_key:
         sid, skey = _load_keys_from_streamlit()
         if sid and skey:
             app_id, app_key = sid, skey
-            print("🔑 Using Streamlit secrets for API keys")
+            print("Using Streamlit secrets for API keys")
 
     if not app_id or not app_key:
-        print(
-            f"❌ ERROR: Could not find ADZUNA_APP_ID or ADZUNA_APP_KEY "
-            f"(use {KEYS_FILE} or Streamlit secrets)."
-        )
+        print(f"ERROR: Missing ADZUNA_APP_ID / ADZUNA_APP_KEY ({KEYS_FILE} or Streamlit secrets).")
         return False
-
-    target_job = config["search"]["job_title"]
     all_jobs = []
 
-    print(f"📡 Fetching live market data for: {target_job}...")
+    print(f"Fetching jobs for: {target_job}")
 
-    # 4. API REQUEST LOOP
     for page in range(1, 4):
         api_url = f"https://api.adzuna.com/v1/api/jobs/us/search/{page}"
         params = {
@@ -85,9 +83,9 @@ def fetch_market_data() -> bool:
                 data = r.json()
                 all_jobs.extend(data.get("results", []))
             else:
-                print(f"⚠️ API Error {r.status_code}: {r.text}")
+                print(f"API error {r.status_code}: {r.text}")
         except Exception as e:
-            print(f"❌ Connection Error: {e}")
+            print(f"Request error: {e}")
 
         time.sleep(0.5)
 
@@ -95,7 +93,6 @@ def fetch_market_data() -> bool:
         print("Empty results. Check your API keys or search term in config.yaml.")
         return False
 
-    # 5. DATA PROCESSING
     df = pd.DataFrame(all_jobs)
 
     df["company"] = df["company"].apply(
@@ -109,13 +106,12 @@ def fetch_market_data() -> bool:
     cols = [c for c in cols if c in df.columns]
     df = df[cols]
 
-    # 6. DATABASE WRITE
     DB_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     with duckdb.connect(str(DB_FILE)) as con:
         con.execute("CREATE OR REPLACE TABLE jobs AS SELECT * FROM df")
 
-    print(f"✅ Success! Ingested {len(df)} jobs into {DB_FILE.name}")
+    print(f"Ingested {len(df)} jobs -> {DB_FILE.name}")
     return True
 
 

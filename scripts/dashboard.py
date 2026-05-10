@@ -2,7 +2,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-# IDE "Run" often executes `python dashboard.py`; interactive widgets need Streamlit's server.
 _SCRIPT = Path(__file__).resolve()
 
 if __name__ == "__main__":
@@ -24,24 +23,18 @@ if __name__ == "__main__":
             ).returncode
         )
 
-import yaml
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# Make sure scripts/ is on path so imports work on cloud and when cwd differs
 sys.path.insert(0, str(_SCRIPT.parent))
 
 from api_connector import fetch_market_data
 from skill_analyzer import analyze
 
-# --- PATHS ---
-CURRENT_DIR = _SCRIPT.parent
-PROJECT_ROOT = CURRENT_DIR.parent
+PROJECT_ROOT = _SCRIPT.parent.parent
 PROCESSED_FILE = PROJECT_ROOT / "data" / "processed_market_data.parquet"
-CONFIG_FILE = PROJECT_ROOT / "config" / "config.yaml"
 
-# --- SKILL CLASSIFICATION ---
 HARD_SKILLS = {
     "Python", "Sql", "R", "Java", "Scala", "Javascript", "Typescript", "C++", "C#",
     "Bash", "Shell", "Go", "Rust", "Matlab", "Sas", "Vba",
@@ -72,38 +65,31 @@ SOFT_SKILLS = {
 st.set_page_config(page_title="Market Skill Discovery", layout="wide")
 st.title("🎯 Targeted Market Skill Discovery")
 
-# --- JOB TITLE INPUT ---
 job_title = st.text_input("Enter a job title to analyze:", placeholder="e.g. Data Analyst, Software Engineer")
 
 if st.button("🚀 Fetch & Analyze"):
     if not job_title.strip():
         st.warning("Please enter a job title first.")
     else:
-        # Write job title to config
-        with open(CONFIG_FILE, 'r') as f:
-            config = yaml.safe_load(f)
-        config['search']['job_title'] = job_title.strip()
-        with open(CONFIG_FILE, 'w') as f:
-            yaml.dump(config, f)
-
         with st.status(f"Running pipeline for '{job_title}'...") as status:
             try:
-                # ✅ Call functions directly — no subprocess
-                status.write("📡 Fetching jobs...")
-                if not fetch_market_data():
+                status.write("Fetching jobs...")
+                if not fetch_market_data(job_title.strip()):
                     raise RuntimeError(
-                        "Could not fetch job listings. Check API keys and config."
+                        "Could not fetch job listings. Add ADZUNA_APP_ID and "
+                        "ADZUNA_APP_KEY to Streamlit Cloud secrets (or local api_keys.txt), "
+                        "and ensure the job title returns API results."
                     )
 
-                status.write("⚙️ Analyzing skills...")
+                status.write("Analyzing skills...")
                 if not analyze():
                     raise RuntimeError(
                         "Could not analyze jobs. Ensure listings were downloaded."
                     )
 
-                status.update(label="✅ Done!", state="complete")
+                status.update(label="Done", state="complete")
             except Exception as e:
-                status.update(label="❌ Pipeline failed!", state="error")
+                status.update(label="Pipeline failed", state="error")
                 st.exception(e)
                 st.stop()
 
@@ -111,7 +97,6 @@ if st.button("🚀 Fetch & Analyze"):
 
 st.divider()
 
-# --- LOAD DATA ---
 @st.cache_data
 def load_processed_data(last_modified: float):
     if not PROCESSED_FILE.exists():
@@ -121,23 +106,17 @@ def load_processed_data(last_modified: float):
 mtime = PROCESSED_FILE.stat().st_mtime if PROCESSED_FILE.exists() else 0
 df = load_processed_data(mtime)
 
-# Gate on actual data, not session_state: Cloud filesystem is ephemeral and can drop
-# parquet between requests while old session flags would still say "ready".
 if df.empty:
     st.info(
-        "Enter a job title above and click **Fetch & Analyze** to get started.\n\n"
-        "If you already ran an analysis but the charts disappeared, the app host may have "
-        "restarted — click **Fetch & Analyze** again. Free hosting does not keep result "
-        "files between restarts."
+        "Enter a job title and click **Fetch & Analyze**. "
+        "On hosted deployments, results disappear after a restart—run the pipeline again."
     )
     st.stop()
 
-# --- SKILL TYPE TOGGLE ---
 skill_type = st.radio("Skill type:", options=["Hard Skills", "Soft Skills"], horizontal=True)
 
 st.divider()
 
-# --- VISUALIZATION ---
 st.subheader(f"Market Insights: {job_title}")
 
 col_chart, col_stats = st.columns([1.3, 0.7])

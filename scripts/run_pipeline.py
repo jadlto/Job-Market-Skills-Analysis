@@ -1,13 +1,11 @@
 import sys
 from pathlib import Path
 
-# --- PATHS ---
 CURRENT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = CURRENT_DIR.parent
 DATA_DIR = PROJECT_ROOT / "data"
 
 def clean_data():
-    """Wipe stale data files before every run."""
     files_to_delete = [
         DATA_DIR / "market_data.duckdb",
         DATA_DIR / "processed_market_data.parquet",
@@ -15,9 +13,9 @@ def clean_data():
     for f in files_to_delete:
         if f.exists():
             f.unlink()
-            print(f"🗑️  Deleted {f.name}")
+            print(f"Deleted {f.name}")
         else:
-            print(f"⚠️  {f.name} not found, skipping.")
+            print(f"{f.name} not found, skip")
 
 
 def main():
@@ -25,18 +23,18 @@ def main():
     from api_connector import fetch_market_data
     from skill_analyzer import analyze
 
-    print("🧹 Cleaning stale data...")
+    print("Cleaning cached data...")
     clean_data()
 
-    print("\n📡 Step 1: Fetching raw data...")
+    print("Fetching...")
     if not fetch_market_data():
-        raise SystemExit("Fetch failed — check API keys, config, and logs above.")
+        raise SystemExit("Fetch failed (keys / config / API).")
 
-    print("\n⚙️  Step 2: Transforming data...")
+    print("Analyzing...")
     if not analyze():
-        raise SystemExit("Analysis failed — ensure the database has job rows.")
+        raise SystemExit("Analyze failed (empty DB?).")
 
-    print("\n✅ Pipeline Finished! Fresh data ready.")
+    print("Done.")
 
 
 if __name__ == "__main__":

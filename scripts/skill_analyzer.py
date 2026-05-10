@@ -48,7 +48,6 @@ SKILLS = [
 
 
 def clean_title(title: str) -> str:
-    """Strip level suffixes and roman numerals from job titles before clustering."""
     title = re.sub(
         r'\b(I{1,3}|IV|VI{0,3}|IX|sr\.?|jr\.?|lead|principal|staff|senior|junior|associate|mid)\b',
         '', title, flags=re.IGNORECASE
@@ -57,11 +56,6 @@ def clean_title(title: str) -> str:
 
 
 def cluster_titles(titles: list[str]) -> dict[str, str]:
-    """
-    Clusters job titles using TF-IDF + KMeans.
-    Cleans titles before vectorizing to avoid level noise like 'III', 'Sr'.
-    Deduplicates cluster name terms so labels are clean.
-    """
     unique_titles = list(set(titles))
     n_unique = len(unique_titles)
     if n_unique == 0:
@@ -74,7 +68,7 @@ def cluster_titles(titles: list[str]) -> dict[str, str]:
     # KMeans requires 1 <= n_clusters <= n_samples
     raw = max(3, min(8, int(n_unique ** 0.45)))
     n_clusters = min(max(1, raw), n_unique)
-    print(f"🔢 Clustering into {n_clusters} categories...")
+    print(f"Clustering titles into {n_clusters} groups")
 
     km = KMeans(n_clusters=n_clusters, random_state=42, n_init="auto")
     km.fit(X)
@@ -98,10 +92,6 @@ def cluster_titles(titles: list[str]) -> dict[str, str]:
 
 
 def extract_skills(desc: str) -> list[str]:
-    """
-    Matches description against skill taxonomy using word boundaries.
-    Fast, accurate, zero noise.
-    """
     desc_lower = str(desc).lower()
     found = []
     for skill in SKILLS:
@@ -112,7 +102,7 @@ def extract_skills(desc: str) -> list[str]:
 
 def analyze() -> bool:
     if not DB_FILE.exists():
-        print("❌ Database not found. Run api_connector.py first.")
+        print("Database not found. Run api_connector first.")
         return False
 
     con = duckdb.connect(str(DB_FILE))
@@ -120,25 +110,17 @@ def analyze() -> bool:
     con.close()
 
     if df.empty:
-        print("❌ No jobs in database. Run api_connector.py fetch first.")
+        print("No rows in jobs table.")
         return False
 
-    # --- TRANSFORM: Cluster titles ---
-    print(f"🏷️  Clustering {df['title'].nunique()} unique titles...")
-    title_map = cluster_titles(df['title'].tolist())
-    df['clean_category'] = df['title'].map(title_map)
+    title_map = cluster_titles(df["title"].tolist())
+    df["clean_category"] = df["title"].map(title_map)
 
-    print("\n📊 Category breakdown:")
-    print(df['clean_category'].value_counts().to_string())
+    df["found_skills"] = df["description"].apply(extract_skills)
 
-    # --- TRANSFORM: Extract skills ---
-    print(f"\n🔍 Extracting skills from {len(df)} descriptions...")
-    df['found_skills'] = df['description'].apply(extract_skills)
-
-    # --- WRITE to parquet ---
     OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(OUTPUT_FILE, index=False)
-    print(f"\n✅ Done. Processed {len(df)} jobs → {OUTPUT_FILE}")
+    print(f"Wrote {len(df)} rows -> {OUTPUT_FILE}")
     return True
 
 
