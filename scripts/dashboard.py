@@ -74,12 +74,29 @@ if st.button("🚀 Fetch & Analyze"):
         with st.status(f"Running pipeline for '{job_title}'...") as status:
             try:
                 status.write("Fetching jobs...")
-                if not fetch_market_data(job_title.strip()):
-                    raise RuntimeError(
-                        "Could not fetch job listings. Add ADZUNA_APP_ID and "
-                        "ADZUNA_APP_KEY to Streamlit Cloud secrets (or local api_keys.txt), "
-                        "and ensure the job title returns API results."
-                    )
+                ok, fetch_err = fetch_market_data(job_title.strip())
+                if not ok:
+                    status.update(label="Pipeline failed", state="error")
+                    if fetch_err == "missing_keys":
+                        st.error(
+                            "**Adzuna API keys are missing.** On "
+                            "[Streamlit Cloud](https://share.streamlit.io): open your app → "
+                            "**⋮ Manage app** → **Settings** → **Secrets**, and paste:\n\n"
+                            "```toml\n"
+                            "ADZUNA_APP_ID = \"your_id_here\"\n"
+                            "ADZUNA_APP_KEY = \"your_key_here\"\n"
+                            "```\n\n"
+                            "Get keys from [developer.adzuna.com](https://developer.adzuna.com). "
+                            "Then click **Save** and **Reboot** the app."
+                        )
+                    elif fetch_err == "empty_results":
+                        st.warning(
+                            "The API returned no job postings for that title. "
+                            "Try another keyword or confirm your Adzuna keys are valid."
+                        )
+                    else:
+                        st.error(f"Fetch failed ({fetch_err}). Check logs.")
+                    st.stop()
 
                 status.write("Analyzing skills...")
                 if not analyze():

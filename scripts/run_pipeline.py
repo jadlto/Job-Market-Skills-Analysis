@@ -27,8 +27,9 @@ def main():
     clean_data()
 
     print("Fetching...")
-    if not fetch_market_data():
-        raise SystemExit("Fetch failed (keys / config / API).")
+    ok, err = fetch_market_data()
+    if not ok:
+        raise SystemExit(f"Fetch failed: {err}")
 
     print("Analyzing...")
     if not analyze():
