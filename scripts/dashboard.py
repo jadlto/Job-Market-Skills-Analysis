@@ -72,9 +72,6 @@ SOFT_SKILLS = {
 st.set_page_config(page_title="Market Skill Discovery", layout="wide")
 st.title("🎯 Targeted Market Skill Discovery")
 
-if "data_ready" not in st.session_state:
-    st.session_state.data_ready = False
-
 # --- JOB TITLE INPUT ---
 job_title = st.text_input("Enter a job title to analyze:", placeholder="e.g. Data Analyst, Software Engineer")
 
@@ -104,7 +101,6 @@ if st.button("🚀 Fetch & Analyze"):
                         "Could not analyze jobs. Ensure listings were downloaded."
                     )
 
-                st.session_state.data_ready = True
                 status.update(label="✅ Done!", state="complete")
             except Exception as e:
                 status.update(label="❌ Pipeline failed!", state="error")
@@ -114,10 +110,6 @@ if st.button("🚀 Fetch & Analyze"):
         st.rerun()
 
 st.divider()
-
-if not st.session_state.data_ready:
-    st.info("Enter a job title above and click **Fetch & Analyze** to get started.")
-    st.stop()
 
 # --- LOAD DATA ---
 @st.cache_data
@@ -129,41 +121,51 @@ def load_processed_data(last_modified: float):
 mtime = PROCESSED_FILE.stat().st_mtime if PROCESSED_FILE.exists() else 0
 df = load_processed_data(mtime)
 
+# Gate on actual data, not session_state: Cloud filesystem is ephemeral and can drop
+# parquet between requests while old session flags would still say "ready".
+if df.empty:
+    st.info(
+        "Enter a job title above and click **Fetch & Analyze** to get started.\n\n"
+        "If you already ran an analysis but the charts disappeared, the app host may have "
+        "restarted — click **Fetch & Analyze** again. Free hosting does not keep result "
+        "files between restarts."
+    )
+    st.stop()
+
 # --- SKILL TYPE TOGGLE ---
 skill_type = st.radio("Skill type:", options=["Hard Skills", "Soft Skills"], horizontal=True)
 
 st.divider()
 
 # --- VISUALIZATION ---
-if not df.empty:
-    st.subheader(f"Market Insights: {job_title}")
+st.subheader(f"Market Insights: {job_title}")
 
-    col_chart, col_stats = st.columns([1.3, 0.7])
+col_chart, col_stats = st.columns([1.3, 0.7])
 
-    with col_chart:
-        skill_set = HARD_SKILLS if skill_type == "Hard Skills" else SOFT_SKILLS
-        all_skills = [
-            skill for sublist in df['found_skills']
-            for skill in sublist
-            if skill in skill_set
-        ]
+with col_chart:
+    skill_set = HARD_SKILLS if skill_type == "Hard Skills" else SOFT_SKILLS
+    all_skills = [
+        skill for sublist in df['found_skills']
+        for skill in sublist
+        if skill in skill_set
+    ]
 
-        skill_counts = pd.Series(all_skills).value_counts().reset_index()
-        skill_counts.columns = ['Skill', 'Count']
+    skill_counts = pd.Series(all_skills).value_counts().reset_index()
+    skill_counts.columns = ['Skill', 'Count']
 
-        if skill_counts.empty:
-            st.info(f"No {skill_type.lower()} found for this search.")
-        else:
-            fig = px.bar(
-                skill_counts.head(15).sort_values('Count'),
-                x='Count', y='Skill', orientation='h',
-                template="plotly_dark", color='Count',
-                title=f"Top {skill_type}"
-            )
-            st.plotly_chart(fig, width="stretch")
+    if skill_counts.empty:
+        st.info(f"No {skill_type.lower()} found for this search.")
+    else:
+        fig = px.bar(
+            skill_counts.head(15).sort_values('Count'),
+            x='Count', y='Skill', orientation='h',
+            template="plotly_dark", color='Count',
+            title=f"Top {skill_type}"
+        )
+        st.plotly_chart(fig, width="stretch")
 
-    with col_stats:
-        st.metric("Total Listings", len(df))
-        st.write("**Top Companies**")
-        top_co = df['company'].value_counts().head(10).reset_index()
-        st.dataframe(top_co, width="stretch", hide_index=True)
+with col_stats:
+    st.metric("Total Listings", len(df))
+    st.write("**Top Companies**")
+    top_co = df['company'].value_counts().head(10).reset_index()
+    st.dataframe(top_co, width="stretch", hide_index=True)
