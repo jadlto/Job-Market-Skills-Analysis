@@ -77,6 +77,13 @@ def _technology_skills() -> pd.DataFrame:
     return pd.read_csv(p, sep="\t", dtype=str).fillna("")
 
 
+def list_primary_occupation_titles() -> list[str]:
+    """Sorted unique primary occupation titles from ``Occupation Data.txt``."""
+    df = _occupation_data()
+    titles = df["Title"].dropna().astype(str).str.strip()
+    return sorted({t for t in titles if len(t) >= 2}, key=str.casefold)
+
+
 def resolve_soc_codes(search_query: str, max_codes: int = 5) -> list[str]:
     """
     Map a free-text job search string (e.g. 'Attorney', 'Data Analyst') to O*NET-SOC codes

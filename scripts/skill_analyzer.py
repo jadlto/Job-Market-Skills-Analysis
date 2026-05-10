@@ -15,7 +15,13 @@ from onet_skills import (
     resolve_soc_codes,
     session_label_sets_for_query,
 )
-from paths import DB_FILE, LAST_SEARCH_TITLE_FILE, ONET_LABEL_OVERRIDES, PROCESSED_PARQUET
+from paths import (
+    DB_FILE,
+    LAST_SEARCH_TITLE_FILE,
+    ONET_LABEL_OVERRIDES,
+    ONET_QUERY_TITLE_FILE,
+    PROCESSED_PARQUET,
+)
 
 
 def clean_title(title: str) -> str:
@@ -157,8 +163,11 @@ def analyze() -> bool:
     title_map = cluster_titles(df["title"].tolist())
     df["clean_category"] = df["title"].map(title_map)
 
+    # Prefer exact O*NET occupation title from the UI dropdown over Adzuna search keywords.
     query = ""
-    if LAST_SEARCH_TITLE_FILE.exists():
+    if ONET_QUERY_TITLE_FILE.exists():
+        query = ONET_QUERY_TITLE_FILE.read_text(encoding="utf-8").strip()
+    if not query and LAST_SEARCH_TITLE_FILE.exists():
         query = LAST_SEARCH_TITLE_FILE.read_text(encoding="utf-8").strip()
 
     try:
@@ -172,7 +181,7 @@ def analyze() -> bool:
     if onet_ok:
         hard, soft = session_label_sets_for_query(query, soc_codes=socs)
         set_onet_session_overrides(hard, soft)
-        print("Extracting skills (O*NET Technology + Skills for matched occupations)...")
+        print("Extracting skills (O*NET Technology Skills for matched occupations)...")
         df["found_skills"] = discover_skills_onet(df["description"], query, soc_codes=socs)
         ONET_LABEL_OVERRIDES.parent.mkdir(parents=True, exist_ok=True)
         with open(ONET_LABEL_OVERRIDES, "w", encoding="utf-8") as f:

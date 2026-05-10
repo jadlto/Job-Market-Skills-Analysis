@@ -4,12 +4,13 @@ from pathlib import Path
 CURRENT_DIR = Path(__file__).parent.resolve()
 
 def clean_data():
-    from paths import DB_FILE, ONET_LABEL_OVERRIDES, PROCESSED_PARQUET
+    from paths import DB_FILE, ONET_LABEL_OVERRIDES, ONET_QUERY_TITLE_FILE, PROCESSED_PARQUET
 
     files_to_delete = [
         DB_FILE,
         PROCESSED_PARQUET,
         ONET_LABEL_OVERRIDES,
+        ONET_QUERY_TITLE_FILE,
     ]
     for f in files_to_delete:
         if f.exists():
