@@ -2,13 +2,14 @@ import sys
 from pathlib import Path
 
 CURRENT_DIR = Path(__file__).parent.resolve()
-PROJECT_ROOT = CURRENT_DIR.parent
-DATA_DIR = PROJECT_ROOT / "data"
 
 def clean_data():
+    from paths import DB_FILE, ONET_LABEL_OVERRIDES, PROCESSED_PARQUET
+
     files_to_delete = [
-        DATA_DIR / "market_data.duckdb",
-        DATA_DIR / "processed_market_data.parquet",
+        DB_FILE,
+        PROCESSED_PARQUET,
+        ONET_LABEL_OVERRIDES,
     ]
     for f in files_to_delete:
         if f.exists():
@@ -23,7 +24,7 @@ def main():
     from api_connector import fetch_market_data
     from skill_analyzer import analyze
 
-    print("Cleaning cached data...")
+    print("Cleaning cached pipeline outputs...")
     clean_data()
 
     print("Fetching...")

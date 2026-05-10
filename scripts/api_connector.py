@@ -7,10 +7,9 @@ import pandas as pd
 import requests
 import yaml
 
+from paths import DB_FILE, LAST_SEARCH_TITLE_FILE, PROJECT_ROOT
+
 CURRENT_DIR = Path(__file__).parent.resolve()
-PROJECT_ROOT = CURRENT_DIR.parent
-DB_FILE = PROJECT_ROOT / "data" / "market_data.duckdb"
-LAST_SEARCH_TITLE_FILE = PROJECT_ROOT / "data" / "last_search_job_title.txt"
 CONFIG_FILE = PROJECT_ROOT / "config" / "config.yaml"
 KEYS_FILE = PROJECT_ROOT / ".venv" / "api_keys.txt"
 

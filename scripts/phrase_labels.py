@@ -1,8 +1,7 @@
 """
-Label TF-IDF phrases for the dashboard: hard vs soft skills, dropping non-relevant text.
-
-Primary signal is ``skill_classifier.predict_skill_label`` (TF-IDF + logistic regression on
-bundled seed labels). Lexicon rules in ``_legacy_categorize`` apply only if prediction fails.
+Label skill phrases for charts: O*NET session overrides (when present), else lexicon drops
+and ``skill_classifier.predict_skill_label`` for TF-IDF fallback; ``_legacy_categorize``
+runs only if prediction fails.
 """
 
 from __future__ import annotations
@@ -11,6 +10,20 @@ import re
 from typing import Literal, Optional
 
 from skill_classifier import predict_skill_label
+
+# Set by skill_analyzer when using O*NET extraction; also loaded from disk in dashboard.
+_SESSION_ONET_HARD: frozenset[str] | None = None
+_SESSION_ONET_SOFT: frozenset[str] | None = None
+
+
+def set_onet_session_overrides(
+    hard: frozenset[str] | None,
+    soft: frozenset[str] | None,
+) -> None:
+    """Lowercased Technology Skill examples (hard) and Skills elements (soft)."""
+    global _SESSION_ONET_HARD, _SESSION_ONET_SOFT
+    _SESSION_ONET_HARD, _SESSION_ONET_SOFT = hard, soft
+
 
 # Soft skills / interpersonal signals (token match inside phrase).
 _SOFT_LEXICON = frozenset(
@@ -98,22 +111,22 @@ _JD_PROSE_DROP = frozenset(
     various multiple several certain generally typically usually often occasionally frequently
     including included excludes excluding exclude following follows follow
     based using use uses used utilizing utilizes utilized useful
-    important critical essential desirable demonstrated demonstrates demonstrated demonstrate
+    important critical essential desirable demonstrated demonstrate demonstrates
     participate participates participating participation contributed contribute contributes contributing
-    excellent excellence outstanding proficient adequately adequately
+    excellent excellence outstanding proficient adequately
     relevant relevance familiarity familiar understands understanding understood
     preferred minimum maximum optimal wishes wish wishing
     goals objectives objective tactical operational operationalize
     execute executes executing execution performs performing performed deliver delivers delivered
     maintain maintains maintained maintenance improve improves improving improvement improved
-    develop develops developing developed development design designs designed designing designed
+    develop develops developing developed development design designs designed designing
     implement implements implementing implemented establish establishes established establishing
     identify identifies identifying identified determine determines determining determined determination
     analyze analyzes analyzing analyse analyse assessed assessing assessments assessment
     evaluate evaluates evaluating evaluated evaluation recommends recommending recommendation
     justify justified supporting supports supported oversight supervise supervised supervises
     oversee oversees overseeing monitor monitors monitoring monitored review reviews reviewing reviewed
-    prepare prepares preparing prepared readiness readiness timely timelines timeline milestones
+    prepare prepares preparing prepared readiness timely timelines timeline milestones
     approximately roughly estimated estimates estimate summaries summary outlined outline listing lists listed
     comprehensive partially partial participation contributions deadlines deadline prioritize prioritized
     primarily principally mainly largely substantially materially exclusively solely
@@ -222,6 +235,11 @@ def categorize_phrase(phrase: str) -> Optional[Literal["hard", "soft"]]:
         return None
     if reject_raw_tfidf_term(pl):
         return None
+    plow = pl.strip().lower()
+    if _SESSION_ONET_HARD and plow in _SESSION_ONET_HARD:
+        return "hard"
+    if _SESSION_ONET_SOFT and plow in _SESSION_ONET_SOFT:
+        return "soft"
     if _should_omit_as_boilerplate(pl):
         return None
     try:

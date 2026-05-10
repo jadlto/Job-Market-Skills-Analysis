@@ -23,6 +23,8 @@ if __name__ == "__main__":
             ).returncode
         )
 
+import json
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -30,14 +32,30 @@ import plotly.express as px
 sys.path.insert(0, str(_SCRIPT.parent))
 
 from api_connector import fetch_market_data
-from phrase_labels import categorize_phrase
+from phrase_labels import categorize_phrase, set_onet_session_overrides
+from paths import LAST_SEARCH_TITLE_FILE, ONET_LABEL_OVERRIDES, PROCESSED_PARQUET
 from skill_analyzer import analyze
 
-PROJECT_ROOT = _SCRIPT.parent.parent
-PROCESSED_FILE = PROJECT_ROOT / "data" / "processed_market_data.parquet"
-LAST_SEARCH_TITLE_FILE = PROJECT_ROOT / "data" / "last_search_job_title.txt"
+
+def _load_onet_overrides() -> None:
+    if not ONET_LABEL_OVERRIDES.exists():
+        set_onet_session_overrides(None, None)
+        return
+    try:
+        with open(ONET_LABEL_OVERRIDES, encoding="utf-8") as f:
+            data = json.load(f)
+        set_onet_session_overrides(
+            frozenset(str(x).lower() for x in data.get("hard", [])),
+            frozenset(str(x).lower() for x in data.get("soft", [])),
+        )
+    except Exception:
+        set_onet_session_overrides(None, None)
+
 
 st.set_page_config(page_title="Market Skill Discovery", layout="wide")
+
+_load_onet_overrides()
+
 st.title("🎯 Targeted Market Skill Discovery")
 
 job_title = st.text_input("Enter a job title to analyze:", placeholder="e.g. Data Analyst, Software Engineer")
@@ -93,12 +111,12 @@ st.divider()
 
 @st.cache_data
 def load_processed_data(last_modified: float):
-    if not PROCESSED_FILE.exists():
+    if not PROCESSED_PARQUET.exists():
         return pd.DataFrame()
-    return pd.read_parquet(PROCESSED_FILE)
+    return pd.read_parquet(PROCESSED_PARQUET)
 
 
-mtime = PROCESSED_FILE.stat().st_mtime if PROCESSED_FILE.exists() else 0
+mtime = PROCESSED_PARQUET.stat().st_mtime if PROCESSED_PARQUET.exists() else 0
 df = load_processed_data(mtime)
 
 if df.empty:
@@ -130,10 +148,14 @@ _insights_q = _insights_job_title()
 st.subheader(
     f"Market Insights: {_insights_q}" if _insights_q else "Market Insights"
 )
+_onet_mode = ONET_LABEL_OVERRIDES.exists()
 st.caption(
-    "**Hard skills** favor concrete tools, platforms, and methods (e.g. SQL, Python, BI tools); "
-    "vague one-word domain terms and JD filler are filtered. Phrases come from **TF-IDF**, "
-    "then a **small classifier** with bundled examples; recruiting boilerplate is dropped first."
+    "Skills are matched against **[O*NET](https://www.onetcenter.org/database.html)** Technology Skills "
+    "and Skills elements for occupations inferred from your search (same taxonomy as "
+    "[O*NET OnLine](https://www.onetonline.org/))."
+    if _onet_mode
+    else "**TF-IDF** phrases plus a small classifier; recruiting boilerplate is filtered first. "
+    "(O*NET matching did not run — missing database, no query match, or fetch used config-only title.)"
 )
 
 col_chart, col_stats = st.columns([1.3, 0.7])
@@ -163,7 +185,11 @@ with col_chart:
             orientation="h",
             template="plotly_dark",
             color="Count",
-            title=f"Top {skill_type} (TF-IDF + classifier)",
+            title=(
+                f"Top {skill_type} — O*NET"
+                if _onet_mode
+                else f"Top {skill_type} — TF-IDF + classifier"
+            ),
         )
         st.plotly_chart(fig, width="stretch")
 

@@ -1,19 +1,21 @@
+import json
 import re
 
 import duckdb
 import numpy as np
 import pandas as pd
-from pathlib import Path
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import normalize
 
-from phrase_labels import categorize_phrase, reject_raw_tfidf_term
-
-CURRENT_DIR = Path(__file__).parent.resolve()
-PROJECT_ROOT = CURRENT_DIR.parent
-DB_FILE = PROJECT_ROOT / "data" / "market_data.duckdb"
-OUTPUT_FILE = PROJECT_ROOT / "data" / "processed_market_data.parquet"
+from phrase_labels import categorize_phrase, reject_raw_tfidf_term, set_onet_session_overrides
+from onet_skills import (
+    discover_skills_onet,
+    ensure_onet_database,
+    resolve_soc_codes,
+    session_label_sets_for_query,
+)
+from paths import DB_FILE, LAST_SEARCH_TITLE_FILE, ONET_LABEL_OVERRIDES, PROCESSED_PARQUET
 
 
 def clean_title(title: str) -> str:
@@ -155,12 +157,47 @@ def analyze() -> bool:
     title_map = cluster_titles(df["title"].tolist())
     df["clean_category"] = df["title"].map(title_map)
 
-    print("Extracting phrases (TF-IDF per posting)...")
-    df["found_skills"] = discover_skills_tfidf(df["description"])
+    query = ""
+    if LAST_SEARCH_TITLE_FILE.exists():
+        query = LAST_SEARCH_TITLE_FILE.read_text(encoding="utf-8").strip()
 
-    OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
-    df.to_parquet(OUTPUT_FILE, index=False)
-    print(f"Wrote {len(df)} rows -> {OUTPUT_FILE}")
+    try:
+        onet_root = ensure_onet_database()
+    except Exception as exc:
+        print(f"O*NET database unavailable ({exc}); using TF-IDF extraction.")
+        onet_root = None
+
+    socs = resolve_soc_codes(query) if (onet_root and query) else []
+    onet_ok = bool(socs)
+    if onet_ok:
+        hard, soft = session_label_sets_for_query(query, soc_codes=socs)
+        set_onet_session_overrides(hard, soft)
+        print("Extracting skills (O*NET Technology + Skills for matched occupations)...")
+        df["found_skills"] = discover_skills_onet(df["description"], query, soc_codes=socs)
+        ONET_LABEL_OVERRIDES.parent.mkdir(parents=True, exist_ok=True)
+        with open(ONET_LABEL_OVERRIDES, "w", encoding="utf-8") as f:
+            json.dump({"hard": sorted(hard), "soft": sorted(soft)}, f)
+    else:
+        set_onet_session_overrides(None, None)
+        try:
+            ONET_LABEL_OVERRIDES.unlink(missing_ok=True)
+        except OSError:
+            pass
+        if not onet_ok:
+            if not query:
+                print("No last search title for O*NET mapping; using TF-IDF extraction.")
+            elif not onet_root:
+                print("O*NET database not available; using TF-IDF extraction.")
+            else:
+                print("O*NET: no SOC match for search query; using TF-IDF extraction.")
+        print("Extracting phrases (TF-IDF per posting)...")
+        df["found_skills"] = discover_skills_tfidf(df["description"])
+
+    set_onet_session_overrides(None, None)
+
+    PROCESSED_PARQUET.parent.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(PROCESSED_PARQUET, index=False)
+    print(f"Wrote {len(df)} rows -> {PROCESSED_PARQUET}")
     return True
 
 
