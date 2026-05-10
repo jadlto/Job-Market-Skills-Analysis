@@ -1,13 +1,42 @@
+import subprocess
 import sys
+from pathlib import Path
+
+# IDE "Run" often executes `python dashboard.py`; interactive widgets need Streamlit's server.
+_SCRIPT = Path(__file__).resolve()
+
+if __name__ == "__main__":
+    import streamlit as st
+    from streamlit.runtime.scriptrunner_utils.script_run_context import get_script_run_ctx
+
+    if get_script_run_ctx() is None:
+        raise SystemExit(
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "streamlit",
+                    "run",
+                    str(_SCRIPT),
+                    *sys.argv[1:],
+                ],
+                cwd=str(_SCRIPT.parent),
+            ).returncode
+        )
+
 import yaml
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from pathlib import Path
-import subprocess
+
+# Make sure scripts/ is on path so imports work on cloud and when cwd differs
+sys.path.insert(0, str(_SCRIPT.parent))
+
+from api_connector import fetch_market_data
+from skill_analyzer import analyze
 
 # --- PATHS ---
-CURRENT_DIR = Path(__file__).parent.resolve()
+CURRENT_DIR = _SCRIPT.parent
 PROJECT_ROOT = CURRENT_DIR.parent
 PROCESSED_FILE = PROJECT_ROOT / "data" / "processed_market_data.parquet"
 CONFIG_FILE = PROJECT_ROOT / "config" / "config.yaml"
@@ -43,7 +72,6 @@ SOFT_SKILLS = {
 st.set_page_config(page_title="Market Skill Discovery", layout="wide")
 st.title("🎯 Targeted Market Skill Discovery")
 
-# ✅ Track whether the user has fetched data in this session
 if "data_ready" not in st.session_state:
     st.session_state.data_ready = False
 
@@ -54,6 +82,7 @@ if st.button("🚀 Fetch & Analyze"):
     if not job_title.strip():
         st.warning("Please enter a job title first.")
     else:
+        # Write job title to config
         with open(CONFIG_FILE, 'r') as f:
             config = yaml.safe_load(f)
         config['search']['job_title'] = job_title.strip()
@@ -61,23 +90,31 @@ if st.button("🚀 Fetch & Analyze"):
             yaml.dump(config, f)
 
         with st.status(f"Running pipeline for '{job_title}'...") as status:
-            result = subprocess.run(
-                [sys.executable, str(CURRENT_DIR / "run_pipeline.py")],
-                capture_output=True,
-                text=True
-            )
-            if result.returncode != 0:
-                status.update(label="❌ Pipeline failed!", state="error")
-                st.code(result.stderr)
-                st.stop()
-            else:
-                st.session_state.data_ready = True  # ✅ only set after successful run
+            try:
+                # ✅ Call functions directly — no subprocess
+                status.write("📡 Fetching jobs...")
+                if not fetch_market_data():
+                    raise RuntimeError(
+                        "Could not fetch job listings. Check API keys and config."
+                    )
+
+                status.write("⚙️ Analyzing skills...")
+                if not analyze():
+                    raise RuntimeError(
+                        "Could not analyze jobs. Ensure listings were downloaded."
+                    )
+
+                st.session_state.data_ready = True
                 status.update(label="✅ Done!", state="complete")
+            except Exception as e:
+                status.update(label="❌ Pipeline failed!", state="error")
+                st.exception(e)
+                st.stop()
+
         st.rerun()
 
 st.divider()
 
-# ✅ Only load and show data if the user has fetched in this session
 if not st.session_state.data_ready:
     st.info("Enter a job title above and click **Fetch & Analyze** to get started.")
     st.stop()
@@ -93,11 +130,7 @@ mtime = PROCESSED_FILE.stat().st_mtime if PROCESSED_FILE.exists() else 0
 df = load_processed_data(mtime)
 
 # --- SKILL TYPE TOGGLE ---
-skill_type = st.radio(
-    "Skill type:",
-    options=["Hard Skills", "Soft Skills"],
-    horizontal=True
-)
+skill_type = st.radio("Skill type:", options=["Hard Skills", "Soft Skills"], horizontal=True)
 
 st.divider()
 
@@ -127,10 +160,10 @@ if not df.empty:
                 template="plotly_dark", color='Count',
                 title=f"Top {skill_type}"
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
     with col_stats:
         st.metric("Total Listings", len(df))
         st.write("**Top Companies**")
         top_co = df['company'].value_counts().head(10).reset_index()
-        st.dataframe(top_co, use_container_width=True, hide_index=True)
+        st.dataframe(top_co, width="stretch", hide_index=True)

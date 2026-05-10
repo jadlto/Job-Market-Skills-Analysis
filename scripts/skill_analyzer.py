@@ -63,13 +63,17 @@ def cluster_titles(titles: list[str]) -> dict[str, str]:
     Deduplicates cluster name terms so labels are clean.
     """
     unique_titles = list(set(titles))
+    n_unique = len(unique_titles)
+    if n_unique == 0:
+        return {}
     cleaned = [clean_title(t) for t in unique_titles]
 
     vectorizer = TfidfVectorizer(ngram_range=(1, 2), stop_words="english")
     X = normalize(vectorizer.fit_transform(cleaned))
 
-    # Fewer clusters for small datasets
-    n_clusters = max(3, min(8, int(len(unique_titles) ** 0.45)))
+    # KMeans requires 1 <= n_clusters <= n_samples
+    raw = max(3, min(8, int(n_unique ** 0.45)))
+    n_clusters = min(max(1, raw), n_unique)
     print(f"🔢 Clustering into {n_clusters} categories...")
 
     km = KMeans(n_clusters=n_clusters, random_state=42, n_init="auto")
@@ -106,14 +110,18 @@ def extract_skills(desc: str) -> list[str]:
     return found
 
 
-def analyze():
+def analyze() -> bool:
     if not DB_FILE.exists():
         print("❌ Database not found. Run api_connector.py first.")
-        return
+        return False
 
     con = duckdb.connect(str(DB_FILE))
     df = con.execute("SELECT title, description, company FROM jobs").df()
     con.close()
+
+    if df.empty:
+        print("❌ No jobs in database. Run api_connector.py fetch first.")
+        return False
 
     # --- TRANSFORM: Cluster titles ---
     print(f"🏷️  Clustering {df['title'].nunique()} unique titles...")
@@ -128,9 +136,11 @@ def analyze():
     df['found_skills'] = df['description'].apply(extract_skills)
 
     # --- WRITE to parquet ---
+    OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(OUTPUT_FILE, index=False)
     print(f"\n✅ Done. Processed {len(df)} jobs → {OUTPUT_FILE}")
+    return True
 
 
 if __name__ == "__main__":
-    analyze()
+    raise SystemExit(0 if analyze() else 1)
