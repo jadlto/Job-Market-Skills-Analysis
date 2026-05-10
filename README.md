@@ -6,7 +6,14 @@ Live job postings ([Adzuna API](https://developer.adzuna.com)) → skill counts 
 
 **[Open on Streamlit Cloud](https://job-market-skills-analysis-c6y44ilrnvrhdelml97bms.streamlit.app/)**
 
-Add `ADZUNA_APP_ID` and `ADZUNA_APP_KEY` under **Settings → Secrets** on Streamlit Cloud.
+On Streamlit Cloud: **Settings → Secrets** — use **TOML with quoted values** (not shell `KEY=value`):
+
+```toml
+ADZUNA_APP_ID = "your_id"
+ADZUNA_APP_KEY = "your_key"
+```
+
+Unquoted or `.env`-style lines are **invalid TOML** and secrets will not load.
 
 ---
 
@@ -61,6 +68,6 @@ The hosted dashboard passes the text box value into the API and does **not** wri
 1. Push to GitHub.
 2. [share.streamlit.io](https://share.streamlit.io) → connect repo.
 3. Main file: `scripts/dashboard.py`.
-4. Secrets: `ADZUNA_APP_ID`, `ADZUNA_APP_KEY`.
+4. Secrets (same TOML format as above — quoted strings).
 
 Hosted storage is ephemeral; re-run **Fetch & Analyze** after restarts.

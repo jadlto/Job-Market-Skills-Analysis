@@ -1,9 +1,11 @@
-import requests
-import pandas as pd
-import yaml
+import os
 import time
-import duckdb
 from pathlib import Path
+
+import duckdb
+import pandas as pd
+import requests
+import yaml
 
 CURRENT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = CURRENT_DIR.parent
@@ -34,14 +36,19 @@ def _pick_secret(sec, *names: str) -> str | None:
     """First non-empty secret value for any of the given keys (flat TOML)."""
     for name in names:
         try:
-            if name not in sec:
-                continue
             val = sec[name]
             if val is not None and str(val).strip():
                 return str(val).strip()
         except Exception:
             continue
     return None
+
+
+def _load_keys_from_environ():
+    """Some hosts inject API keys as environment variables."""
+    aid = (os.environ.get("ADZUNA_APP_ID") or os.environ.get("adzuna_app_id") or "").strip()
+    akey = (os.environ.get("ADZUNA_APP_KEY") or os.environ.get("adzuna_app_key") or "").strip()
+    return (aid or None), (akey or None)
 
 
 def _load_keys_from_streamlit():
@@ -95,6 +102,12 @@ def fetch_market_data(job_title: str | None = None) -> tuple[bool, str]:
         if sid and skey:
             app_id, app_key = sid, skey
             print("Using Streamlit secrets for API keys")
+
+    if not app_id or not app_key:
+        eid, ekey = _load_keys_from_environ()
+        if eid and ekey:
+            app_id, app_key = eid, ekey
+            print("Using environment variables for API keys")
 
     if not app_id or not app_key:
         print(f"ERROR: Missing ADZUNA_APP_ID / ADZUNA_APP_KEY ({KEYS_FILE} or Streamlit secrets).")

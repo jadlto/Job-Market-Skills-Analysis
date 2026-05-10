@@ -79,15 +79,16 @@ if st.button("🚀 Fetch & Analyze"):
                     status.update(label="Pipeline failed", state="error")
                     if fetch_err == "missing_keys":
                         st.error(
-                            "**Adzuna API keys are missing.** On "
-                            "[Streamlit Cloud](https://share.streamlit.io): open your app → "
-                            "**⋮ Manage app** → **Settings** → **Secrets**, and paste:\n\n"
+                            "**The app cannot read your Adzuna keys.** "
+                            "Streamlit Cloud Secrets must be **valid TOML** — not `.env` style. "
+                            "Lines like `ADZUNA_APP_ID=abc123` **fail parsing**, so keys never reach the app.\n\n"
+                            "Use **spaces around `=`** and **double quotes** around each value:\n\n"
                             "```toml\n"
-                            "ADZUNA_APP_ID = \"your_id_here\"\n"
-                            "ADZUNA_APP_KEY = \"your_key_here\"\n"
+                            "ADZUNA_APP_ID = \"paste_your_app_id_here\"\n"
+                            "ADZUNA_APP_KEY = \"paste_your_app_key_here\"\n"
                             "```\n\n"
-                            "Get keys from [developer.adzuna.com](https://developer.adzuna.com). "
-                            "Then click **Save** and **Reboot** the app."
+                            "In [Streamlit Cloud](https://share.streamlit.io): **Manage app** → **Settings** → "
+                            "**Secrets** → **Save** → **Reboot**. Keys: [developer.adzuna.com](https://developer.adzuna.com)."
                         )
                     elif fetch_err == "empty_results":
                         st.warning(
