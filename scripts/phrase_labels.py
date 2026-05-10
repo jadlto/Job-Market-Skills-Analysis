@@ -87,6 +87,72 @@ _BROAD_DOMAIN_UNIGRAM_DROP = frozenset(
     """.split()
 )
 
+# JD filler verbs/adjectives (single-token only) — keep off soft-skill words like
+# communication, collaboration, leadership, agile, scrum, presentation, negotiation, …
+_JD_PROSE_DROP = frozenset(
+    """
+    ensure ensures ensuring assured assure assures assuring
+    strong stronger strongest weak weaker weakly
+    decision decisions decisive
+    validation validations validate validates validated validity verify verifies verified
+    various multiple several certain generally typically usually often occasionally frequently
+    including included excludes excluding exclude following follows follow
+    based using use uses used utilizing utilizes utilized useful
+    important critical essential desirable demonstrated demonstrates demonstrated demonstrate
+    participate participates participating participation contributed contribute contributes contributing
+    excellent excellence outstanding proficient adequately adequately
+    relevant relevance familiarity familiar understands understanding understood
+    preferred minimum maximum optimal wishes wish wishing
+    goals objectives objective tactical operational operationalize
+    execute executes executing execution performs performing performed deliver delivers delivered
+    maintain maintains maintained maintenance improve improves improving improvement improved
+    develop develops developing developed development design designs designed designing designed
+    implement implements implementing implemented establish establishes established establishing
+    identify identifies identifying identified determine determines determining determined determination
+    analyze analyzes analyzing analyse analyse assessed assessing assessments assessment
+    evaluate evaluates evaluating evaluated evaluation recommends recommending recommendation
+    justify justified supporting supports supported oversight supervise supervised supervises
+    oversee oversees overseeing monitor monitors monitoring monitored review reviews reviewing reviewed
+    prepare prepares preparing prepared readiness readiness timely timelines timeline milestones
+    approximately roughly estimated estimates estimate summaries summary outlined outline listing lists listed
+    comprehensive partially partial participation contributions deadlines deadline prioritize prioritized
+    primarily principally mainly largely substantially materially exclusively solely
+    furthermore moreover additionally besides accordingly hence thus therefore consequently
+    overall holistic aggregate aggregated consolidated consolidate notable notably emphasis emphasize
+    amongst among between throughout via per equally likewise similarly unlike versus
+    """.split()
+)
+
+# Role/organization nouns surfaced as “skills” (single-token only).
+_GENERIC_ROLE_THING_DROP = frozenset(
+    """
+    product products service services solution solutions offering offerings deliverable deliverables
+    capability capabilities feature features function functions module modules component components
+    platform platforms system systems application applications software hardware dataset datasets
+    database databases warehouse warehouses pipeline pipelines workflow workflows process processes
+    procedure procedures operation operations initiative initiatives program programs project projects
+    portfolio portfolios engagement engagements role roles title titles category categories
+    domain domains field fields sector sectors vertical verticals industry industries market markets
+    segment segments business businesses enterprise enterprises organization organizations company companies
+    firm firms group groups vendor vendors supplier suppliers partnership partnerships account accounts
+    """.split()
+)
+
+
+def reject_raw_tfidf_term(term: str) -> bool:
+    """
+    Drop vector terms before scoring/heuristics: pure numbers, Section/list artifacts, etc.
+    Raw terms from sklearn are typically lowercased by the vectorizer.
+    """
+    t = (term or "").strip().lower()
+    if not t:
+        return True
+    if re.fullmatch(r"[\d,\.\s]+$", t):
+        return True
+    if t in {"id", "ids", "req", "reqs", "ref", "no", "yes", "na", "n/a"}:
+        return True
+    return False
+
 
 def _should_omit_as_boilerplate(phrase: str) -> bool:
     """Recruiting / JD noise; must run before ML so lexicon drops are not overridden."""
@@ -97,9 +163,14 @@ def _should_omit_as_boilerplate(phrase: str) -> bool:
         return True
     words = pl.split()
     if len(words) == 1:
-        if words[0] in _SINGLE_DROP:
+        w = words[0]
+        if w in _SINGLE_DROP:
             return True
-        if words[0] in _BROAD_DOMAIN_UNIGRAM_DROP:
+        if w in _BROAD_DOMAIN_UNIGRAM_DROP:
+            return True
+        if w in _JD_PROSE_DROP:
+            return True
+        if w in _GENERIC_ROLE_THING_DROP:
             return True
         return False
     if all(w in _SINGLE_DROP for w in words):
@@ -124,7 +195,12 @@ def _legacy_categorize(phrase: str) -> Optional[Literal["hard", "soft"]]:
 
     if len(words) == 1:
         w = words[0]
-        if w in _SINGLE_DROP or w in _BROAD_DOMAIN_UNIGRAM_DROP:
+        if (
+            w in _SINGLE_DROP
+            or w in _BROAD_DOMAIN_UNIGRAM_DROP
+            or w in _JD_PROSE_DROP
+            or w in _GENERIC_ROLE_THING_DROP
+        ):
             return None
         return "hard"
 
@@ -143,6 +219,8 @@ def categorize_phrase(phrase: str) -> Optional[Literal["hard", "soft"]]:
     """
     pl = phrase.strip()
     if not pl:
+        return None
+    if reject_raw_tfidf_term(pl):
         return None
     if _should_omit_as_boilerplate(pl):
         return None

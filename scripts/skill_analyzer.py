@@ -8,7 +8,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import normalize
 
-from phrase_labels import categorize_phrase
+from phrase_labels import categorize_phrase, reject_raw_tfidf_term
 
 CURRENT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = CURRENT_DIR.parent
@@ -121,6 +121,8 @@ def discover_skills_tfidf(descriptions: pd.Series, top_per_doc: int = 15) -> pd.
             j = idx[k]
             term = terms[j]
             if len(term.strip()) < 2:
+                continue
+            if reject_raw_tfidf_term(term):
                 continue
             disp = _format_phrase(term)
             if categorize_phrase(disp) is None:
