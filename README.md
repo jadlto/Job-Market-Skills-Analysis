@@ -1,10 +1,26 @@
 # Targeted Market Skill Discovery
 
-Pull live job postings from the **[Adzuna API](https://developer.adzuna.com)**, then infer skills per listing:
+Pull live job postings from the **[Adzuna API](https://developer.adzuna.com)** and surface **tools and software** mentioned in descriptions by matching against **[O*NET Technology Skills](https://www.onetcenter.org/database.html)** for the occupation you pick.
 
-1. **Preferred path — [O*NET](https://www.onetonline.org/) taxonomy** — Your search string is mapped to O*NET-SOC occupations (titles + alternate titles). Job descriptions are scanned for phrases drawn from official **[Technology Skills](https://www.onetcenter.org/database.html)** examples and **Skills** elements for those occupations. Hard vs soft labels follow O*NET session metadata (technology examples → hard; skill elements → soft). On first use, the app downloads the tab-delimited **O*NET 30.2** database from the [O*NET Resource Center](https://www.onetcenter.org/database.html) (~13 MB, Creative Commons).
+## How it works
 
-2. **Fallback — TF-IDF + classifier** — If the O*NET bundle is unavailable, no occupation matches your query, or mapping fails, the pipeline uses per-document TF-IDF (unigrams + bigrams) and a small bundled **logistic regression** model (hard / soft / non-relevant), with lexicon-based boilerplate filtering.
+### Dashboard
+
+1. **Single dropdown** — Choose one technology-focused **O*NET** occupation:
+   - SOC codes **`15-*`** (*Computer and Mathematical Occupations*: developers, data roles, DBAs, analysts, etc.)
+   - Plus **`11-3021.00`** (*Computer and Information Systems Managers*)
+
+2. **Fetch & Analyze** — The same title is sent to **Adzuna** and stored for **O*NET** mapping. Descriptions are scanned for phrases that appear in the **Technology Skills** list for the resolved occupation (plus a few supplemental labels such as **SQL** / **Structured Query Language** that postings often use but the database may not list as standalone rows).
+
+3. **Results** — A **Top skills** bar chart counts how often each matched O*NET technology string appears across listings. This is **not** a general “all skills” view; it is **tool- and software-oriented** by design.
+
+On first use, the app downloads the official **O*NET** tab-delimited database from the [O*NET Resource Center](https://www.onetcenter.org/database.html) (~13 MB, [Creative Commons](https://www.onetcenter.org/license_db.html)). The consumer site [O*NET OnLine](https://www.onetonline.org/) uses the same underlying taxonomy.
+
+### Fallback
+
+If the O*NET bundle is missing or unusable, analysis falls back to **TF-IDF** (unigrams + bigrams) and a small bundled **logistic regression** classifier (hard / soft / non-relevant), with lexicon-based boilerplate filtering.
+
+---
 
 ## Live app
 
@@ -57,13 +73,13 @@ streamlit run scripts/dashboard.py
 
 Running `python scripts/dashboard.py` re-invokes Streamlit when no GUI context is detected.
 
-**CLI pipeline** — deletes cached `data` artifacts (DuckDB, Parquet, O*NET label overrides), then fetches using **`config/config.yaml`** (`search.job_title`) and runs analysis:
+**CLI pipeline** — wipes cached outputs under `data/`, then fetches using **`config/config.yaml`** (`search.job_title`) and runs analysis:
 
 ```bash
 python scripts/run_pipeline.py
 ```
 
-The hosted UI passes the search box into the API and does **not** write `config.yaml`. The CLI still reads `config.yaml` when no title is passed on the command line.
+The hosted app does **not** write `config.yaml`; the CLI uses it when no other title is supplied.
 
 ### Runtime data (gitignored `data/`)
 
@@ -71,9 +87,10 @@ The hosted UI passes the search box into the API and does **not** write `config.
 |----------|------|
 | `market_data.duckdb` | Raw job rows from Adzuna |
 | `processed_market_data.parquet` | Per-posting `found_skills` and metadata |
-| `last_search_job_title.txt` | Query string used to resolve O*NET occupations |
-| `onet/db_30_2_text.zip` (and extracted folder) | Official O*NET tab files (downloaded once) |
-| `onet_label_overrides.json` | Lowercased hard/soft phrase sets for the dashboard when O*NET mode ran |
+| `last_search_job_title.txt` | Last Adzuna query string |
+| `onet_query_title.txt` | Selected O*NET occupation title used for SOC → Technology Skills |
+| `onet/db_30_2_text.zip` (and `db_30_2_text/`) | Official O*NET tab files (downloaded once) |
+| `onet_label_overrides.json` | Lowercased technology phrases for chart labeling when O*NET mode ran |
 
 ---
 
@@ -84,4 +101,4 @@ The hosted UI passes the search box into the API and does **not** write `config.
 3. Main file: `scripts/dashboard.py`.
 4. Secrets: same quoted TOML format as above.
 
-Hosted filesystems are ephemeral; after a restart, run **Fetch & Analyze** again. The first O*NET-backed run may take longer while the database zip downloads and extracts.
+Hosted storage is ephemeral; after a restart, run **Fetch & Analyze** again. The first run may take longer while the O*NET zip downloads and extracts.
