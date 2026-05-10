@@ -1,6 +1,6 @@
 # Targeted Market Skill Discovery
 
-Live job postings ([Adzuna API](https://developer.adzuna.com)) → skill counts in descriptions by job title.
+Live job postings ([Adzuna API](https://developer.adzuna.com)) → **TF-IDF phrases** from each batch of descriptions (no fixed skill dictionary). An optional view filters phrases with a small soft-skill keyword list.
 
 ## Live app
 

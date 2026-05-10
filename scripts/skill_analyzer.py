@@ -1,58 +1,40 @@
-import duckdb
-import pandas as pd
 import re
+
+import duckdb
+import numpy as np
+import pandas as pd
 from pathlib import Path
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import normalize
 
-# --- PATHS ---
 CURRENT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = CURRENT_DIR.parent
 DB_FILE = PROJECT_ROOT / "data" / "market_data.duckdb"
 OUTPUT_FILE = PROJECT_ROOT / "data" / "processed_market_data.parquet"
 
-# --- SKILL TAXONOMY ---
-SKILLS = [
-    # Languages
-    "python", "sql", "r", "java", "scala", "javascript", "typescript", "c++", "c#",
-    "bash", "shell", "go", "rust", "matlab", "sas", "vba",
-    # Data & Analytics
-    "excel", "tableau", "power bi", "looker", "qlik", "dax", "pandas", "numpy",
-    "scipy", "matplotlib", "seaborn", "plotly", "dbt", "airflow", "spark",
-    "hadoop", "kafka", "duckdb", "databricks", "snowflake", "redshift", "bigquery",
-    "etl", "elt", "data warehouse", "data lake", "data pipeline", "data modeling",
-    # ML / AI
-    "machine learning", "deep learning", "nlp", "computer vision", "scikit-learn",
-    "tensorflow", "pytorch", "keras", "xgboost", "lightgbm", "mlflow", "hugging face",
-    "llm", "generative ai", "reinforcement learning", "a/b testing", "statistics",
-    # Cloud & Infra
-    "aws", "azure", "gcp", "google cloud", "docker", "kubernetes", "terraform",
-    "ci/cd", "git", "github", "gitlab", "linux", "rest api", "graphql",
-    # Databases
-    "postgresql", "mysql", "mongodb", "redis", "elasticsearch", "oracle", "sql server",
-    "sqlite", "cassandra", "dynamodb",
-    # Finance & Accounting
-    "gaap", "ifrs", "cpa", "cfa", "financial modeling", "financial reporting",
-    "fp&a", "budgeting", "forecasting", "variance analysis", "reconciliation",
-    "accounts payable", "accounts receivable", "quickbooks", "sap", "netsuite",
-    "vlookup", "pivot tables",
-    # Business & PM
-    "jira", "confluence", "agile", "scrum", "kanban", "product management",
-    "stakeholder management", "requirements gathering", "risk management",
-    "six sigma", "lean", "erp",
-    # Soft skills
-    "communication", "leadership", "problem solving", "critical thinking",
-    "project management", "cross functional",
-]
+# Drop boilerplate / meta words that TF-IDF often picks from job ads (not role skills).
+_EXTRA_STOP = frozenset(
+    """
+    location salary benefits remote hybrid onsite full time part equal opportunity
+    employer details apply www http https com job jobs position role work company
+    team based state united states description looking seeking candidate must will
+    including etc years year experience required preferred click apply online
+    posting posting date listed qualified applicants disability veteran eeo aa
+    resume cv application applications reply send email phone interview hiring
+    department office home relocation relocation bonus commission
+    """.split()
+)
 
 
 def clean_title(title: str) -> str:
     title = re.sub(
-        r'\b(I{1,3}|IV|VI{0,3}|IX|sr\.?|jr\.?|lead|principal|staff|senior|junior|associate|mid)\b',
-        '', title, flags=re.IGNORECASE
+        r"\b(I{1,3}|IV|VI{0,3}|IX|sr\.?|jr\.?|lead|principal|staff|senior|junior|associate|mid)\b",
+        "",
+        title,
+        flags=re.IGNORECASE,
     )
-    return re.sub(r'\s+', ' ', title).strip()
+    return re.sub(r"\s+", " ", title).strip()
 
 
 def cluster_titles(titles: list[str]) -> dict[str, str]:
@@ -65,7 +47,6 @@ def cluster_titles(titles: list[str]) -> dict[str, str]:
     vectorizer = TfidfVectorizer(ngram_range=(1, 2), stop_words="english")
     X = normalize(vectorizer.fit_transform(cleaned))
 
-    # KMeans requires 1 <= n_clusters <= n_samples
     raw = max(3, min(8, int(n_unique ** 0.45)))
     n_clusters = min(max(1, raw), n_unique)
     print(f"Clustering titles into {n_clusters} groups")
@@ -91,13 +72,81 @@ def cluster_titles(titles: list[str]) -> dict[str, str]:
     return {title: cluster_names[label] for title, label in zip(unique_titles, km.labels_)}
 
 
-def extract_skills(desc: str) -> list[str]:
-    desc_lower = str(desc).lower()
-    found = []
-    for skill in SKILLS:
-        if re.search(rf'\b{re.escape(skill)}\b', desc_lower):
-            found.append(skill.title())
-    return found
+def _noise_term(term: str) -> bool:
+    parts = term.lower().split()
+    if len(parts) == 1 and len(parts[0]) < 3:
+        return True
+    return any(p in _EXTRA_STOP for p in parts)
+
+
+def _format_phrase(term: str) -> str:
+    """Title-case for display; keeps short acronyms readable."""
+    t = term.strip()
+    if not t:
+        return ""
+    return t.title()
+
+
+def discover_skills_tfidf(descriptions: pd.Series, top_per_doc: int = 15) -> pd.Series:
+    """
+    Per posting: highest TF-IDF unigrams/bigrams (english stop words removed).
+    No fixed skill taxonomy — phrases are whatever distinguishes text in this batch.
+    """
+    texts = descriptions.fillna("").astype(str).tolist()
+    n_docs = len(texts)
+    if n_docs == 0:
+        return pd.Series([], dtype=object)
+
+    min_df = max(1, min(5, max(1, n_docs // 25)))
+    vectorizer = None
+    X = None
+    for md in (min_df, max(1, min_df - 1), 1):
+        try:
+            vectorizer = TfidfVectorizer(
+                ngram_range=(1, 2),
+                stop_words="english",
+                min_df=md,
+                max_df=0.92,
+                sublinear_tf=True,
+                max_features=12000,
+            )
+            X = vectorizer.fit_transform(texts)
+            if X.shape[1] > 0:
+                break
+        except ValueError:
+            continue
+    if vectorizer is None or X is None or X.shape[1] == 0:
+        return pd.Series([[] for _ in range(n_docs)], index=descriptions.index)
+
+    terms = vectorizer.get_feature_names_out()
+    out_lists = []
+
+    for i in range(n_docs):
+        row = X.getrow(i)
+        idx = row.indices
+        data = row.data
+        if len(idx) == 0:
+            out_lists.append([])
+            continue
+        order = np.argsort(-data)
+        picked = []
+        seen_lower = set()
+        for k in order:
+            j = idx[k]
+            term = terms[j]
+            if _noise_term(term):
+                continue
+            disp = _format_phrase(term)
+            dl = disp.lower()
+            if not dl or dl in seen_lower:
+                continue
+            seen_lower.add(dl)
+            picked.append(disp)
+            if len(picked) >= top_per_doc:
+                break
+        out_lists.append(picked)
+
+    return pd.Series(out_lists, index=descriptions.index)
 
 
 def analyze() -> bool:
@@ -116,7 +165,8 @@ def analyze() -> bool:
     title_map = cluster_titles(df["title"].tolist())
     df["clean_category"] = df["title"].map(title_map)
 
-    df["found_skills"] = df["description"].apply(extract_skills)
+    print("Extracting phrases (TF-IDF per posting)...")
+    df["found_skills"] = discover_skills_tfidf(df["description"])
 
     OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(OUTPUT_FILE, index=False)

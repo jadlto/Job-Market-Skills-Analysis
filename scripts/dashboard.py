@@ -1,3 +1,4 @@
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -35,32 +36,21 @@ from skill_analyzer import analyze
 PROJECT_ROOT = _SCRIPT.parent.parent
 PROCESSED_FILE = PROJECT_ROOT / "data" / "processed_market_data.parquet"
 
-HARD_SKILLS = {
-    "Python", "Sql", "R", "Java", "Scala", "Javascript", "Typescript", "C++", "C#",
-    "Bash", "Shell", "Go", "Rust", "Matlab", "Sas", "Vba",
-    "Excel", "Tableau", "Power Bi", "Looker", "Qlik", "Dax", "Pandas", "Numpy",
-    "Scipy", "Matplotlib", "Seaborn", "Plotly", "Dbt", "Airflow", "Spark",
-    "Hadoop", "Kafka", "Duckdb", "Databricks", "Snowflake", "Redshift", "Bigquery",
-    "Etl", "Elt", "Data Warehouse", "Data Lake", "Data Pipeline", "Data Modeling",
-    "Machine Learning", "Deep Learning", "Nlp", "Computer Vision", "Scikit-Learn",
-    "Tensorflow", "Pytorch", "Keras", "Xgboost", "Lightgbm", "Mlflow", "Hugging Face",
-    "Llm", "Generative Ai", "Reinforcement Learning", "A/B Testing", "Statistics",
-    "Aws", "Azure", "Gcp", "Google Cloud", "Docker", "Kubernetes", "Terraform",
-    "Ci/Cd", "Git", "Github", "Gitlab", "Linux", "Rest Api", "Graphql",
-    "Postgresql", "Mysql", "Mongodb", "Redis", "Elasticsearch", "Oracle", "Sql Server",
-    "Sqlite", "Cassandra", "Dynamodb",
-    "Gaap", "Ifrs", "Cpa", "Cfa", "Financial Modeling", "Financial Reporting",
-    "Fp&A", "Budgeting", "Forecasting", "Variance Analysis", "Reconciliation",
-    "Accounts Payable", "Accounts Receivable", "Quickbooks", "Sap", "Netsuite",
-    "Vlookup", "Pivot Tables",
-    "Jira", "Confluence", "Agile", "Scrum", "Kanban", "Erp", "Six Sigma", "Lean",
-}
+# Optional filter: phrases whose tokens overlap this set (not a full taxonomy).
+_SOFT_LEXICON = frozenset(
+    """
+    communication leadership negotiation collaboration teamwork presentation
+    interpersonal mentoring coaching empathy listening writing speaking stakeholder
+    relationship persuasion influence facilitation adaptability diplomacy consensus
+    collaborative organizational verbal oral written multicultural diversity inclusion
+    """.split()
+)
 
-SOFT_SKILLS = {
-    "Communication", "Leadership", "Problem Solving", "Critical Thinking",
-    "Project Management", "Cross Functional", "Stakeholder Management",
-    "Requirements Gathering", "Risk Management",
-}
+
+def _phrase_soft_leaning(phrase: str) -> bool:
+    tokens = set(re.findall(r"[a-z]+", phrase.lower()))
+    return bool(tokens & _SOFT_LEXICON)
+
 
 st.set_page_config(page_title="Market Skill Discovery", layout="wide")
 st.title("🎯 Targeted Market Skill Discovery")
@@ -115,11 +105,13 @@ if st.button("🚀 Fetch & Analyze"):
 
 st.divider()
 
+
 @st.cache_data
 def load_processed_data(last_modified: float):
     if not PROCESSED_FILE.exists():
         return pd.DataFrame()
     return pd.read_parquet(PROCESSED_FILE)
+
 
 mtime = PROCESSED_FILE.stat().st_mtime if PROCESSED_FILE.exists() else 0
 df = load_processed_data(mtime)
@@ -131,38 +123,56 @@ if df.empty:
     )
     st.stop()
 
-skill_type = st.radio("Skill type:", options=["Hard Skills", "Soft Skills"], horizontal=True)
+view = st.radio(
+    "Phrase view:",
+    options=["All phrases (TF-IDF)", "Soft-skill leaning (keyword filter)"],
+    horizontal=True,
+)
 
 st.divider()
 
 st.subheader(f"Market Insights: {job_title}")
+st.caption(
+    "Phrases come from **TF-IDF** on job descriptions in this batch (unigrams + bigrams). "
+    "They are not a fixed dictionary — they reflect what text is most distinctive in these postings."
+)
 
 col_chart, col_stats = st.columns([1.3, 0.7])
 
 with col_chart:
-    skill_set = HARD_SKILLS if skill_type == "Hard Skills" else SOFT_SKILLS
     all_skills = [
-        skill for sublist in df['found_skills']
+        skill
+        for sublist in df["found_skills"]
         for skill in sublist
-        if skill in skill_set
+        if view == "All phrases (TF-IDF)" or _phrase_soft_leaning(skill)
     ]
 
     skill_counts = pd.Series(all_skills).value_counts().reset_index()
-    skill_counts.columns = ['Skill', 'Count']
+    skill_counts.columns = ["Skill", "Count"]
 
     if skill_counts.empty:
-        st.info(f"No {skill_type.lower()} found for this search.")
+        st.info(
+            "No phrases matched this view. Try **All phrases**, or run fetch again with more listings."
+        )
     else:
+        chart_title = (
+            "Top phrases (TF-IDF)"
+            if view == "All phrases (TF-IDF)"
+            else "Soft-skill leaning phrases"
+        )
         fig = px.bar(
-            skill_counts.head(15).sort_values('Count'),
-            x='Count', y='Skill', orientation='h',
-            template="plotly_dark", color='Count',
-            title=f"Top {skill_type}"
+            skill_counts.head(15).sort_values("Count"),
+            x="Count",
+            y="Skill",
+            orientation="h",
+            template="plotly_dark",
+            color="Count",
+            title=chart_title,
         )
         st.plotly_chart(fig, width="stretch")
 
 with col_stats:
     st.metric("Total Listings", len(df))
     st.write("**Top Companies**")
-    top_co = df['company'].value_counts().head(10).reset_index()
+    top_co = df["company"].value_counts().head(10).reset_index()
     st.dataframe(top_co, width="stretch", hide_index=True)
