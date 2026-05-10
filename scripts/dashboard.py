@@ -131,9 +131,9 @@ st.subheader(
     f"Market Insights: {_insights_q}" if _insights_q else "Market Insights"
 )
 st.caption(
-    "Phrases come from **TF-IDF** (unigrams + bigrams), then a **small classifier** "
-    "(hard vs soft vs non-relevant) trained on bundled examples — generic recruiting "
-    "language is dropped as **non-relevant**. Lexicon rules apply only if the model fails."
+    "**Hard skills** favor concrete tools, platforms, and methods (e.g. SQL, Python, BI tools); "
+    "vague one-word domain terms and JD filler are filtered. Phrases come from **TF-IDF**, "
+    "then a **small classifier** with bundled examples; recruiting boilerplate is dropped first."
 )
 
 col_chart, col_stats = st.columns([1.3, 0.7])

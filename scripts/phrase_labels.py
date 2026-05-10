@@ -74,8 +74,37 @@ _SINGLE_DROP = frozenset(
     grade grades step steps ladder level levels entry senior junior mid staff associate
     employment firm company corporation llc inc plc corp team group practice area office
     experience experiences insurance enterprise technology business
+    looking looks
     """.split()
 )
+
+# Vague domain nouns that often surface from TF-IDF but are not concrete tools (SQL, Python, …).
+# Only applied to single-token phrases so bigrams like "data analysis" still go to the classifier.
+_BROAD_DOMAIN_UNIGRAM_DROP = frozenset(
+    """
+    analysis analyses reporting analytics insight insights metric metrics
+    visualization visualisation forecasting
+    """.split()
+)
+
+
+def _should_omit_as_boilerplate(phrase: str) -> bool:
+    """Recruiting / JD noise; must run before ML so lexicon drops are not overridden."""
+    pl = phrase.strip().lower()
+    if not pl:
+        return True
+    if pl in _PHRASE_DROP:
+        return True
+    words = pl.split()
+    if len(words) == 1:
+        if words[0] in _SINGLE_DROP:
+            return True
+        if words[0] in _BROAD_DOMAIN_UNIGRAM_DROP:
+            return True
+        return False
+    if all(w in _SINGLE_DROP for w in words):
+        return True
+    return False
 
 
 def _legacy_categorize(phrase: str) -> Optional[Literal["hard", "soft"]]:
@@ -95,7 +124,7 @@ def _legacy_categorize(phrase: str) -> Optional[Literal["hard", "soft"]]:
 
     if len(words) == 1:
         w = words[0]
-        if w in _SINGLE_DROP:
+        if w in _SINGLE_DROP or w in _BROAD_DOMAIN_UNIGRAM_DROP:
             return None
         return "hard"
 
@@ -114,6 +143,8 @@ def categorize_phrase(phrase: str) -> Optional[Literal["hard", "soft"]]:
     """
     pl = phrase.strip()
     if not pl:
+        return None
+    if _should_omit_as_boilerplate(pl):
         return None
     try:
         lab = predict_skill_label(pl)
