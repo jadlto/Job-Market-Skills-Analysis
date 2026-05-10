@@ -126,15 +126,6 @@ if df.empty:
     )
     st.stop()
 
-skill_type = st.radio(
-    "Skill type:",
-    options=["Hard Skills", "Soft Skills"],
-    horizontal=True,
-)
-
-st.divider()
-
-
 def _insights_job_title() -> str:
     q = job_title.strip()
     if q:
@@ -150,9 +141,8 @@ st.subheader(
 )
 _onet_mode = ONET_LABEL_OVERRIDES.exists()
 st.caption(
-    "Skills are matched against **[O*NET](https://www.onetcenter.org/database.html)** Technology Skills "
-    "and Skills elements for occupations inferred from your search (same taxonomy as "
-    "[O*NET OnLine](https://www.onetonline.org/))."
+    "Tools and software names are matched against **[O*NET Technology Skills](https://www.onetcenter.org/database.html)** "
+    "for occupations aligned with your search (same taxonomy as [O*NET OnLine](https://www.onetonline.org/))."
     if _onet_mode
     else "**TF-IDF** phrases plus a small classifier; recruiting boilerplate is filtered first. "
     "(O*NET matching did not run — missing database, no query match, or fetch used config-only title.)"
@@ -161,12 +151,11 @@ st.caption(
 col_chart, col_stats = st.columns([1.3, 0.7])
 
 with col_chart:
-    want = "soft" if skill_type == "Soft Skills" else "hard"
     all_skills = [
         skill
         for sublist in df["found_skills"]
         for skill in sublist
-        if categorize_phrase(skill) == want
+        if categorize_phrase(skill) == "hard"
     ]
 
     skill_counts = pd.Series(all_skills).value_counts().reset_index()
@@ -174,8 +163,8 @@ with col_chart:
 
     if skill_counts.empty:
         st.info(
-            f"No **{skill_type.lower()}** matched after filtering. "
-            "Try the other category, run **Fetch & Analyze** again, or try a different job title."
+            "No technology or tool phrases matched after filtering. "
+            "Run **Fetch & Analyze** again or try a different job title."
         )
     else:
         fig = px.bar(
@@ -185,11 +174,7 @@ with col_chart:
             orientation="h",
             template="plotly_dark",
             color="Count",
-            title=(
-                f"Top {skill_type} — O*NET"
-                if _onet_mode
-                else f"Top {skill_type} — TF-IDF + classifier"
-            ),
+            title="Top skills",
         )
         st.plotly_chart(fig, width="stretch")
 

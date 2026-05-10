@@ -54,7 +54,7 @@ def ensure_onet_database() -> Path | None:
     if not occ.exists():
         return None
 
-    for loader in (_occupation_data, _alternate_titles, _technology_skills, _skills_ratings):
+    for loader in (_occupation_data, _alternate_titles, _technology_skills):
         loader.cache_clear()
     return root
 
@@ -74,12 +74,6 @@ def _alternate_titles() -> pd.DataFrame:
 @lru_cache(maxsize=1)
 def _technology_skills() -> pd.DataFrame:
     p = onet_extract_path() / "Technology Skills.txt"
-    return pd.read_csv(p, sep="\t", dtype=str).fillna("")
-
-
-@lru_cache(maxsize=1)
-def _skills_ratings() -> pd.DataFrame:
-    p = onet_extract_path() / "Skills.txt"
     return pd.read_csv(p, sep="\t", dtype=str).fillna("")
 
 
@@ -122,6 +116,26 @@ def resolve_soc_codes(search_query: str, max_codes: int = 5) -> list[str]:
     return [soc for soc, _ in ranked[:max_codes]]
 
 
+# JDs cite these constantly; O*NET Technology Skills often lists only full product names.
+_SUPPLEMENTAL_TECH_EXAMPLES = (
+    "Structured Query Language",
+    "SQL",
+)
+
+
+def _merge_supplemental_technology(examples: list[str]) -> list[str]:
+    """Dedupe case-insensitively, keep longest-first order for substring matching."""
+    seen: set[str] = {e.strip().lower() for e in examples}
+    out = list(examples)
+    for e in _SUPPLEMENTAL_TECH_EXAMPLES:
+        el = e.strip().lower()
+        if el not in seen and len(el) >= 2:
+            seen.add(el)
+            out.append(e.strip())
+    out.sort(key=len, reverse=True)
+    return out
+
+
 def technology_examples_for_socs(soc_codes: list[str]) -> list[str]:
     """Distinct technology product examples for the given occupations, longest names first."""
     if not soc_codes:
@@ -131,26 +145,7 @@ def technology_examples_for_socs(soc_codes: list[str]) -> list[str]:
     examples = tech.loc[mask, "Example"].astype(str).str.strip()
     examples = [e for e in examples.unique().tolist() if len(e) >= 3]
     examples.sort(key=len, reverse=True)
-    return examples
-
-
-def skill_elements_for_socs(soc_codes: list[str], importance_min: float = 3.0) -> list[str]:
-    """
-    Skill element names (Skills domain) with importance (IM) at or above threshold.
-    """
-    if not soc_codes:
-        return []
-    skills = _skills_ratings()
-    sub = skills[
-        (skills["O*NET-SOC Code"].isin(soc_codes))
-        & (skills["Scale ID"] == "IM")
-    ].copy()
-    sub["Data Value"] = pd.to_numeric(sub["Data Value"], errors="coerce")
-    sub = sub[sub["Data Value"] >= importance_min]
-    names = sub["Element Name"].astype(str).str.strip().unique().tolist()
-    names = [n for n in names if len(n) >= 3]
-    names.sort(key=len, reverse=True)
-    return names
+    return _merge_supplemental_technology(examples)
 
 
 def _phrase_in_text(haystack_lower: str, phrase_lower: str) -> bool:
@@ -190,21 +185,19 @@ def discover_skills_onet(
     max_per_doc: int = 40,
 ) -> pd.Series:
     """
-    Per posting: scan description for O*NET Technology Skills examples + Skills elements
-    linked to occupations inferred from search_query (or reuse soc_codes if provided).
+    Per posting: scan description for O*NET Technology Skills examples for occupations
+    inferred from search_query (or reuse soc_codes if provided).
     """
     soc_codes = soc_codes if soc_codes is not None else resolve_soc_codes(search_query)
     if not soc_codes:
         return pd.Series([[] for _ in range(len(descriptions))], index=descriptions.index)
 
     tech = technology_examples_for_socs(soc_codes)
-    soft_like = skill_elements_for_socs(soc_codes)
-    tech_set = set(tech)
-    combined_sorted = tech + [s for s in soft_like if s not in tech_set]
+    combined_sorted = tech
 
     print(
         f"O*NET: using SOC codes {soc_codes[:5]}{'...' if len(soc_codes) > 5 else ''} "
-        f"({len(tech)} technology examples, {len(soft_like)} skill elements)."
+        f"({len(tech)} technology examples)."
     )
 
     out_lists = []
@@ -221,12 +214,10 @@ def session_label_sets_for_query(
     soc_codes: list[str] | None = None,
 ) -> tuple[frozenset[str], frozenset[str]]:
     """
-    Lowercased phrase sets for categorize_phrase overrides: (hard_tech, soft_skills_elements).
+    Lowercased Technology Skill examples for ``categorize_phrase`` (hard). Soft is empty
+    because the app only surfaces technology/tool matches in charts.
     """
     soc_codes = soc_codes if soc_codes is not None else resolve_soc_codes(search_query)
     tech_raw = technology_examples_for_socs(soc_codes)
-    skill_raw = skill_elements_for_socs(soc_codes)
     hard = frozenset(t.strip().lower() for t in tech_raw if t.strip())
-    soft = frozenset(s.strip().lower() for s in skill_raw if s.strip())
-    soft = frozenset(s for s in soft if s not in hard)
-    return hard, soft
+    return hard, frozenset()
