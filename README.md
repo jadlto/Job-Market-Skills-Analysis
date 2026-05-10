@@ -1,6 +1,6 @@
 # Targeted Market Skill Discovery
 
-Live job postings ([Adzuna API](https://developer.adzuna.com)) → **TF-IDF phrases** from each batch of descriptions (no fixed skill dictionary). An optional view filters phrases with a small soft-skill keyword list.
+Live job postings ([Adzuna API](https://developer.adzuna.com)) → **TF-IDF phrases** per batch, then **Hard vs Soft** labels (soft = interpersonal lexicon match; hard = other non-boilerplate phrases). Recruiting/title fluff is filtered heuristically — not semantic AI.
 
 ## Live app
 

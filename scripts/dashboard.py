@@ -1,4 +1,3 @@
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -31,26 +30,11 @@ import plotly.express as px
 sys.path.insert(0, str(_SCRIPT.parent))
 
 from api_connector import fetch_market_data
+from phrase_labels import categorize_phrase
 from skill_analyzer import analyze
 
 PROJECT_ROOT = _SCRIPT.parent.parent
 PROCESSED_FILE = PROJECT_ROOT / "data" / "processed_market_data.parquet"
-
-# Optional filter: phrases whose tokens overlap this set (not a full taxonomy).
-_SOFT_LEXICON = frozenset(
-    """
-    communication leadership negotiation collaboration teamwork presentation
-    interpersonal mentoring coaching empathy listening writing speaking stakeholder
-    relationship persuasion influence facilitation adaptability diplomacy consensus
-    collaborative organizational verbal oral written multicultural diversity inclusion
-    """.split()
-)
-
-
-def _phrase_soft_leaning(phrase: str) -> bool:
-    tokens = set(re.findall(r"[a-z]+", phrase.lower()))
-    return bool(tokens & _SOFT_LEXICON)
-
 
 st.set_page_config(page_title="Market Skill Discovery", layout="wide")
 st.title("🎯 Targeted Market Skill Discovery")
@@ -123,9 +107,9 @@ if df.empty:
     )
     st.stop()
 
-view = st.radio(
-    "Phrase view:",
-    options=["All phrases (TF-IDF)", "Soft-skill leaning (keyword filter)"],
+skill_type = st.radio(
+    "Skill type:",
+    options=["Hard Skills", "Soft Skills"],
     horizontal=True,
 )
 
@@ -133,18 +117,21 @@ st.divider()
 
 st.subheader(f"Market Insights: {job_title}")
 st.caption(
-    "Phrases come from **TF-IDF** on job descriptions in this batch (unigrams + bigrams). "
-    "They are not a fixed dictionary — they reflect what text is most distinctive in these postings."
+    "Phrases are discovered with **TF-IDF** (unigrams + bigrams), then labeled: "
+    "**Soft** if they match an interpersonal/communication lexicon; **Hard** for other "
+    "skill-like phrases. Job-title and recruiting boilerplate (e.g. “Attorney”, “Growing”) "
+    "are filtered out — this is heuristic, not human judgment."
 )
 
 col_chart, col_stats = st.columns([1.3, 0.7])
 
 with col_chart:
+    want = "soft" if skill_type == "Soft Skills" else "hard"
     all_skills = [
         skill
         for sublist in df["found_skills"]
         for skill in sublist
-        if view == "All phrases (TF-IDF)" or _phrase_soft_leaning(skill)
+        if categorize_phrase(skill) == want
     ]
 
     skill_counts = pd.Series(all_skills).value_counts().reset_index()
@@ -152,14 +139,10 @@ with col_chart:
 
     if skill_counts.empty:
         st.info(
-            "No phrases matched this view. Try **All phrases**, or run fetch again with more listings."
+            f"No **{skill_type.lower()}** matched after filtering. "
+            "Try the other category, run **Fetch & Analyze** again, or try a different job title."
         )
     else:
-        chart_title = (
-            "Top phrases (TF-IDF)"
-            if view == "All phrases (TF-IDF)"
-            else "Soft-skill leaning phrases"
-        )
         fig = px.bar(
             skill_counts.head(15).sort_values("Count"),
             x="Count",
@@ -167,7 +150,7 @@ with col_chart:
             orientation="h",
             template="plotly_dark",
             color="Count",
-            title=chart_title,
+            title=f"Top {skill_type} (TF-IDF + labels)",
         )
         st.plotly_chart(fig, width="stretch")
 

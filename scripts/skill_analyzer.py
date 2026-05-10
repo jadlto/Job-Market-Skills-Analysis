@@ -8,23 +8,12 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import normalize
 
+from phrase_labels import categorize_phrase
+
 CURRENT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = CURRENT_DIR.parent
 DB_FILE = PROJECT_ROOT / "data" / "market_data.duckdb"
 OUTPUT_FILE = PROJECT_ROOT / "data" / "processed_market_data.parquet"
-
-# Drop boilerplate / meta words that TF-IDF often picks from job ads (not role skills).
-_EXTRA_STOP = frozenset(
-    """
-    location salary benefits remote hybrid onsite full time part equal opportunity
-    employer details apply www http https com job jobs position role work company
-    team based state united states description looking seeking candidate must will
-    including etc years year experience required preferred click apply online
-    posting posting date listed qualified applicants disability veteran eeo aa
-    resume cv application applications reply send email phone interview hiring
-    department office home relocation relocation bonus commission
-    """.split()
-)
 
 
 def clean_title(title: str) -> str:
@@ -72,13 +61,6 @@ def cluster_titles(titles: list[str]) -> dict[str, str]:
     return {title: cluster_names[label] for title, label in zip(unique_titles, km.labels_)}
 
 
-def _noise_term(term: str) -> bool:
-    parts = term.lower().split()
-    if len(parts) == 1 and len(parts[0]) < 3:
-        return True
-    return any(p in _EXTRA_STOP for p in parts)
-
-
 def _format_phrase(term: str) -> str:
     """Title-case for display; keeps short acronyms readable."""
     t = term.strip()
@@ -89,8 +71,8 @@ def _format_phrase(term: str) -> str:
 
 def discover_skills_tfidf(descriptions: pd.Series, top_per_doc: int = 15) -> pd.Series:
     """
-    Per posting: highest TF-IDF unigrams/bigrams (english stop words removed).
-    No fixed skill taxonomy — phrases are whatever distinguishes text in this batch.
+    Per posting: highest TF-IDF unigrams/bigrams, then drop recruiting boilerplate via
+    phrase_labels.categorize_phrase. max_df suppresses terms that appear in most postings.
     """
     texts = descriptions.fillna("").astype(str).tolist()
     n_docs = len(texts)
@@ -101,20 +83,24 @@ def discover_skills_tfidf(descriptions: pd.Series, top_per_doc: int = 15) -> pd.
     vectorizer = None
     X = None
     for md in (min_df, max(1, min_df - 1), 1):
-        try:
-            vectorizer = TfidfVectorizer(
-                ngram_range=(1, 2),
-                stop_words="english",
-                min_df=md,
-                max_df=0.92,
-                sublinear_tf=True,
-                max_features=12000,
-            )
-            X = vectorizer.fit_transform(texts)
-            if X.shape[1] > 0:
+        for max_df in (0.52, 0.62, 0.72, 0.85):
+            try:
+                v = TfidfVectorizer(
+                    ngram_range=(1, 2),
+                    stop_words="english",
+                    min_df=md,
+                    max_df=max_df,
+                    sublinear_tf=True,
+                    max_features=12000,
+                )
+                xt = v.fit_transform(texts)
+            except ValueError:
+                continue
+            if xt.shape[1] > 0:
+                vectorizer, X = v, xt
                 break
-        except ValueError:
-            continue
+        if vectorizer is not None:
+            break
     if vectorizer is None or X is None or X.shape[1] == 0:
         return pd.Series([[] for _ in range(n_docs)], index=descriptions.index)
 
@@ -134,9 +120,11 @@ def discover_skills_tfidf(descriptions: pd.Series, top_per_doc: int = 15) -> pd.
         for k in order:
             j = idx[k]
             term = terms[j]
-            if _noise_term(term):
+            if len(term.strip()) < 2:
                 continue
             disp = _format_phrase(term)
+            if categorize_phrase(disp) is None:
+                continue
             dl = disp.lower()
             if not dl or dl in seen_lower:
                 continue
