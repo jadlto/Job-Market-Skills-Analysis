@@ -1,14 +1,16 @@
 """
-Classify TF-IDF phrases into Hard vs Soft skills, or drop recruiting boilerplate.
+Label TF-IDF phrases for the dashboard: hard vs soft skills, dropping non-relevant text.
 
-Hard ≈ tools, domain methods, regulations, technical procedures (not people-skills lexicon).
-Soft ≈ overlap with a lexicon of interpersonal / communication-style terms.
+Primary signal is ``skill_classifier.predict_skill_label`` (TF-IDF + logistic regression on
+bundled seed labels). Lexicon rules in ``_legacy_categorize`` apply only if prediction fails.
 """
 
 from __future__ import annotations
 
 import re
 from typing import Literal, Optional
+
+from skill_classifier import predict_skill_label
 
 # Soft skills / interpersonal signals (token match inside phrase).
 _SOFT_LEXICON = frozenset(
@@ -71,15 +73,13 @@ _SINGLE_DROP = frozenset(
     quarterly signing retention relocation bonus stock options package packages band bands
     grade grades step steps ladder level levels entry senior junior mid staff associate
     employment firm company corporation llc inc plc corp team group practice area office
+    experience experiences insurance enterprise technology business
     """.split()
 )
 
 
-def categorize_phrase(phrase: str) -> Optional[Literal["hard", "soft"]]:
-    """
-    Return 'soft' if soft-skill lexicon hits; 'hard' for other non-boilerplate skill-like
-    phrases; None to omit (titles, recruiting fluff, generic tokens).
-    """
+def _legacy_categorize(phrase: str) -> Optional[Literal["hard", "soft"]]:
+    """TF-IDF-era heuristic when ML is unavailable."""
     pl = phrase.strip().lower()
     if not pl:
         return None
@@ -99,12 +99,29 @@ def categorize_phrase(phrase: str) -> Optional[Literal["hard", "soft"]]:
             return None
         return "hard"
 
-    # Multi-word: drop if every word is a junk singleton token
     if all(w in _SINGLE_DROP for w in words):
         return None
 
-    # Keep domain / tool-like phrases (e.g. employment law, civil litigation, microsoft excel)
     return "hard"
+
+
+def categorize_phrase(phrase: str) -> Optional[Literal["hard", "soft"]]:
+    """
+    Labels phrases with a small TF-IDF + logistic model (hard / soft / non-relevant),
+    keeping only hard & soft for downstream charts. Non-relevant maps to None.
+
+    Falls back to lexicon rules if prediction fails.
+    """
+    pl = phrase.strip()
+    if not pl:
+        return None
+    try:
+        lab = predict_skill_label(pl)
+    except Exception:
+        return _legacy_categorize(pl)
+    if lab == "non_relevant":
+        return None
+    return lab  # hard | soft
 
 
 def is_boilerplate(phrase: str) -> bool:

@@ -35,6 +35,7 @@ from skill_analyzer import analyze
 
 PROJECT_ROOT = _SCRIPT.parent.parent
 PROCESSED_FILE = PROJECT_ROOT / "data" / "processed_market_data.parquet"
+LAST_SEARCH_TITLE_FILE = PROJECT_ROOT / "data" / "last_search_job_title.txt"
 
 st.set_page_config(page_title="Market Skill Discovery", layout="wide")
 st.title("🎯 Targeted Market Skill Discovery")
@@ -115,12 +116,24 @@ skill_type = st.radio(
 
 st.divider()
 
-st.subheader(f"Market Insights: {job_title}")
+
+def _insights_job_title() -> str:
+    q = job_title.strip()
+    if q:
+        return q
+    if LAST_SEARCH_TITLE_FILE.exists():
+        return LAST_SEARCH_TITLE_FILE.read_text(encoding="utf-8").strip()
+    return ""
+
+
+_insights_q = _insights_job_title()
+st.subheader(
+    f"Market Insights: {_insights_q}" if _insights_q else "Market Insights"
+)
 st.caption(
-    "Phrases are discovered with **TF-IDF** (unigrams + bigrams), then labeled: "
-    "**Soft** if they match an interpersonal/communication lexicon; **Hard** for other "
-    "skill-like phrases. Job-title and recruiting boilerplate (e.g. “Attorney”, “Growing”) "
-    "are filtered out — this is heuristic, not human judgment."
+    "Phrases come from **TF-IDF** (unigrams + bigrams), then a **small classifier** "
+    "(hard vs soft vs non-relevant) trained on bundled examples — generic recruiting "
+    "language is dropped as **non-relevant**. Lexicon rules apply only if the model fails."
 )
 
 col_chart, col_stats = st.columns([1.3, 0.7])
@@ -150,7 +163,7 @@ with col_chart:
             orientation="h",
             template="plotly_dark",
             color="Count",
-            title=f"Top {skill_type} (TF-IDF + labels)",
+            title=f"Top {skill_type} (TF-IDF + classifier)",
         )
         st.plotly_chart(fig, width="stretch")
 

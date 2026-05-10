@@ -10,6 +10,7 @@ import yaml
 CURRENT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = CURRENT_DIR.parent
 DB_FILE = PROJECT_ROOT / "data" / "market_data.duckdb"
+LAST_SEARCH_TITLE_FILE = PROJECT_ROOT / "data" / "last_search_job_title.txt"
 CONFIG_FILE = PROJECT_ROOT / "config" / "config.yaml"
 KEYS_FILE = PROJECT_ROOT / ".venv" / "api_keys.txt"
 
@@ -158,6 +159,9 @@ def fetch_market_data(job_title: str | None = None) -> tuple[bool, str]:
 
     with duckdb.connect(str(DB_FILE)) as con:
         con.execute("CREATE OR REPLACE TABLE jobs AS SELECT * FROM df")
+
+    LAST_SEARCH_TITLE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    LAST_SEARCH_TITLE_FILE.write_text(target_job, encoding="utf-8")
 
     print(f"Ingested {len(df)} jobs -> {DB_FILE.name}")
     return True, ""
