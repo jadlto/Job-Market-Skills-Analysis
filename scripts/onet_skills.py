@@ -84,6 +84,19 @@ def list_primary_occupation_titles() -> list[str]:
     return sorted({t for t in titles if len(t) >= 2}, key=str.casefold)
 
 
+def list_technology_occupation_titles() -> list[str]:
+    """
+    Computer / math / data-related O*NET occupations likely to have Technology Skills:
+    SOC **15-** (Computer and Mathematical Occupations) plus **11-3021.00** (Computer and
+    Information Systems Managers).
+    """
+    df = _occupation_data()
+    soc = df["O*NET-SOC Code"].astype(str).str.strip()
+    mask = soc.str.startswith("15-", na=False) | (soc == "11-3021.00")
+    titles = df.loc[mask, "Title"].dropna().astype(str).str.strip()
+    return sorted({t for t in titles if len(t) >= 2}, key=str.casefold)
+
+
 def resolve_soc_codes(search_query: str, max_codes: int = 5) -> list[str]:
     """
     Map a free-text job search string (e.g. 'Attorney', 'Data Analyst') to O*NET-SOC codes

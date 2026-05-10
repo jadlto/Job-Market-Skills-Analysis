@@ -58,14 +58,14 @@ def _load_onet_overrides() -> None:
 
 
 @st.cache_data
-def _onet_occupation_titles() -> list[str]:
-    """Primary occupation titles from O*NET (empty if database missing)."""
-    from onet_skills import ensure_onet_database, list_primary_occupation_titles
+def _technology_occupation_titles() -> list[str]:
+    """O*NET tech-focused occupations (SOC 15-* + IT managers); empty if DB missing."""
+    from onet_skills import ensure_onet_database, list_technology_occupation_titles
 
     if ensure_onet_database() is None:
         return []
     try:
-        return list_primary_occupation_titles()
+        return list_technology_occupation_titles()
     except Exception:
         return []
 
@@ -76,66 +76,32 @@ _load_onet_overrides()
 
 st.title("🎯 Targeted Market Skill Discovery")
 
-occupation_titles = _onet_occupation_titles()
-use_onet_select = bool(occupation_titles)
+tech_occupations = _technology_occupation_titles()
 
-if use_onet_select:
-    st.caption(
-        "Choose the **exact O*NET occupation** for skill matching. "
-        "Optional shorter keywords below improve how many jobs Adzuna returns."
-    )
-    filter_q = st.text_input("Filter occupations (optional)", placeholder="Type to narrow the list")
-    needle = (filter_q or "").strip().lower()
-    filtered = [t for t in occupation_titles if not needle or needle in t.lower()]
-    if not filtered:
-        st.warning("No occupations match that filter — clear or change the filter text.")
-        selected_occupation = None
-    else:
-        selected_occupation = st.selectbox(
-            "Select occupation",
-            options=filtered,
-            index=0,
-            help="Uses O*NET primary titles (same taxonomy as O*NET OnLine).",
-        )
-    adzuna_keywords = st.text_input(
-        "Job board search (optional)",
-        placeholder="e.g. Financial Analyst — leave blank to search using the occupation title",
-        help="Adzuna works best with short phrases. If empty, the selected occupation title is used.",
-    )
-    fetch_enabled = selected_occupation is not None
-    manual_query = None
-else:
+if not tech_occupations:
     st.warning(
-        "O*NET occupation list is not available yet (database downloads on first analysis, ~13 MB). "
-        "Enter a free-text job title for Adzuna until then."
+        "The O*NET database is not available yet (it downloads automatically on first run, ~13 MB). "
+        "Refresh after a few seconds, or run the app locally with network access."
     )
-    manual_query = st.text_input(
-        "Job title to search",
-        placeholder="e.g. Data Analyst, Financial Analyst",
+    selected = None
+else:
+    st.caption(
+        "O*NET **Computer and Mathematical** occupations (SOC 15-*) plus IT systems managers — aligned with technology skill data."
     )
-    selected_occupation = None
-    adzuna_keywords = ""
-    fetch_enabled = bool(manual_query and manual_query.strip())
+    selected = st.selectbox(
+        "Occupation",
+        options=tech_occupations,
+        index=0,
+        label_visibility="visible",
+    )
 
-if st.button("🚀 Fetch & Analyze", disabled=not fetch_enabled):
-    q_api = ""
+if st.button("🚀 Fetch & Analyze", disabled=not selected):
+    q_api = selected.strip()
     try:
         ONET_QUERY_TITLE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        if use_onet_select and selected_occupation:
-            ONET_QUERY_TITLE_FILE.write_text(selected_occupation.strip(), encoding="utf-8")
-            q_api = (adzuna_keywords or "").strip() or selected_occupation.strip()
-        else:
-            try:
-                ONET_QUERY_TITLE_FILE.unlink(missing_ok=True)
-            except OSError:
-                pass
-            q_api = (manual_query or "").strip()
+        ONET_QUERY_TITLE_FILE.write_text(q_api, encoding="utf-8")
     except OSError as e:
-        st.error(f"Could not save occupation selection: {e}")
-        st.stop()
-
-    if not q_api:
-        st.warning("Nothing to search.")
+        st.error(f"Could not save selection: {e}")
         st.stop()
 
     with st.status(f"Running pipeline for «{q_api}»...") as status:
@@ -159,8 +125,7 @@ if st.button("🚀 Fetch & Analyze", disabled=not fetch_enabled):
                     )
                 elif fetch_err == "empty_results":
                     st.warning(
-                        "The API returned no job postings for that query. "
-                        "Try different keywords in **Job board search** or another occupation."
+                        "The API returned no job postings for that occupation title. Try another role from the list."
                     )
                 else:
                     st.error(f"Fetch failed ({fetch_err}). Check logs.")
@@ -195,26 +160,18 @@ df = load_processed_data(mtime)
 
 if df.empty:
     st.info(
-        "Select an occupation and click **Fetch & Analyze**. "
-        "On hosted deployments, results disappear after a restart — run the pipeline again."
+        "Choose an occupation above and click **Fetch & Analyze**. "
+        "Hosted apps lose cached data on restart — run the pipeline again."
     )
     st.stop()
 
 
 def _insights_job_title() -> str:
-    onet = (
-        ONET_QUERY_TITLE_FILE.read_text(encoding="utf-8").strip()
-        if ONET_QUERY_TITLE_FILE.exists()
-        else ""
-    )
-    adz = (
-        LAST_SEARCH_TITLE_FILE.read_text(encoding="utf-8").strip()
-        if LAST_SEARCH_TITLE_FILE.exists()
-        else ""
-    )
-    if onet and adz and onet.casefold() != adz.casefold():
-        return f"{onet} · listings «{adz}»"
-    return onet or adz or ""
+    if ONET_QUERY_TITLE_FILE.exists():
+        return ONET_QUERY_TITLE_FILE.read_text(encoding="utf-8").strip()
+    if LAST_SEARCH_TITLE_FILE.exists():
+        return LAST_SEARCH_TITLE_FILE.read_text(encoding="utf-8").strip()
+    return ""
 
 
 _insights_q = _insights_job_title()
@@ -224,10 +181,10 @@ st.subheader(
 _onet_mode = ONET_LABEL_OVERRIDES.exists()
 st.caption(
     "Tools and software names are matched against **[O*NET Technology Skills](https://www.onetcenter.org/database.html)** "
-    "for occupations aligned with your selection (same taxonomy as [O*NET OnLine](https://www.onetonline.org/))."
+    "for the selected occupation."
     if _onet_mode
     else "**TF-IDF** phrases plus a small classifier; recruiting boilerplate is filtered first. "
-    "(O*NET matching did not run — missing database, no occupation match, or offline setup.)"
+    "(O*NET matching did not run.)"
 )
 
 col_chart, col_stats = st.columns([1.3, 0.7])
@@ -245,8 +202,8 @@ with col_chart:
 
     if skill_counts.empty:
         st.info(
-            "No technology or tool phrases matched in these postings. "
-            "Try **Job board search** keywords that match how employers write ads, or pick a related occupation."
+            "No tool or software phrases from O*NET matched the job text in these listings. "
+            "Try another occupation from the list."
         )
     else:
         fig = px.bar(
